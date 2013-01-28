@@ -298,6 +298,25 @@ void *vmalloc(unsigned long size)
 }
 EXPORT_SYMBOL(vmalloc);
 
+/*
+ *      vzalloc - allocate virtually continguos memory with zero fill
+ *
+ *      @size:          allocation size
+ *
+ *      Allocate enough pages to cover @size from the page level
+ *      allocator and map them into continguos kernel virtual space.
+ *      The memory allocated is set to zero.
+ *
+ *      For tight control over page level allocator and protection flags
+ *      use __vmalloc() instead.
+ */
+void *vzalloc(unsigned long size)
+{
+    return __vmalloc(size, GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO,
+                                 PAGE_KERNEL);
+}
+EXPORT_SYMBOL(vzalloc);
+
 void *vmalloc_node(unsigned long size, int node)
 {
 	return vmalloc(size);
