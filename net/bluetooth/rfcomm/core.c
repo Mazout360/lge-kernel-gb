@@ -2138,11 +2138,6 @@ static ssize_t rfcomm_dlc_sysfs_show(struct class *dev, char *buf)
 	return (str-buf);
 }
 
-static int rfcomm_dlc_debugfs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, rfcomm_dlc_sysfs_show, inode->i_private);
-}
-
 static CLASS_ATTR(rfcomm_dlc, S_IRUGO, rfcomm_dlc_sysfs_show, NULL);
 
 /* ---- Initialization ---- */
