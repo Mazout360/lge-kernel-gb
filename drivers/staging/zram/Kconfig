@@ -19,6 +19,23 @@ config ZRAM
 	  See zram.txt for more information.
 	  Project home: http://compcache.googlecode.com/
 
+config ZRAM_NUM_DEVICES
+	int "Default number of zram devices"
+	depends on ZRAM
+	range 1 32
+	default 1
+	help
+	  Select default number of zram devices. You can override this value
+	  using 'num_devices' module parameter.
+
+config ZRAM_DEFAULT_PERCENTAGE
+	int "Default number of zram percentage"
+	depends on ZRAM
+	range 10 80
+	default 25
+	help
+	  Select default zram disk size: percentage of total RAM
+
 config ZRAM_DEBUG
 	bool "Compressed RAM block device debug support"
 	depends on ZRAM
@@ -32,9 +49,9 @@ choice ZRAM_COMPRESS
 	depends on ZRAM
 	default ZRAM_LZO
 	help
-	Select the compression method used by zram
-	LZO is the default. Snappy compresses a bit worse (around ~2%) but
-	much (~2x) faster, at least on x86-64.	
+	  Select the compression method used by zram.
+	  LZO is the default. Snappy compresses a bit worse (around ~2%) but
+	  much (~2x) faster, at least on x86-64.
 config ZRAM_LZO
 	bool "LZO compression"
 	select LZO_COMPRESS
@@ -44,3 +61,10 @@ config ZRAM_SNAPPY
 	depends on SNAPPY_COMPRESS
 	depends on SNAPPY_DECOMPRESS
 endchoice
+
+config ZRAM_DEFAULT_DISKSIZE
+	int "Default size of zram in bytes"
+	depends on ZRAM
+	default 100663296
+	help
+	  Set default zram disk size (default ~ 96MB)
