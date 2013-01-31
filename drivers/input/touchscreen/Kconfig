@@ -287,7 +287,7 @@ config TOUCHSCREEN_TEGRA_ODM
 
 config TOUCHSCREEN_ANDROID_VIRTUALKEYS
 	boolean "Support userspace-managed virtual keys on android"
-	depends on TOUCHSCREEN_TEGRA_ODM
+	depends on HACKFEST_INPUT
 	default y
 	help
 	  Replaces the direct key events with a sysfs file with the key coordinates
@@ -572,4 +572,12 @@ config TOUCHSCREEN_PCAP
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcap_ts.
+
+config HACKFEST_INPUT
+	tristate "Hackfest touchscreen support"
+    depends on ARCH_TEGRA && TEGRA_NVRM
+	default n
+	help
+	  Say Y here to support touchscreen for hackfest-based builds.
+
 endif
