@@ -409,12 +409,16 @@ void __blk_run_queue(struct request_queue *q)
 	 * handling reinvoke the handler shortly if we already got there.
 	 */
 	if (!queue_flag_test_and_set(QUEUE_FLAG_REENTER, q)) {
-		q->request_fn(q);
+		if (!q->notified_urgent && q->elevator->elevator_type->ops.elevator_is_urgent_fn && q->urgent_request_fn && q->elevator->elevator_type->ops.elevator_is_urgent_fn(q)) {
+            q->notified_urgent = true;
+            q->urgent_request_fn(q);
+        } else 
+            q->request_fn(q);
 		queue_flag_clear(QUEUE_FLAG_REENTER, q);
-	} else {
+    } else {
 		queue_flag_set(QUEUE_FLAG_PLUGGED, q);
 		kblockd_schedule_work(q, &q->unplug_work);
-	}
+    }
 }
 EXPORT_SYMBOL(__blk_run_queue);
 
@@ -1923,8 +1927,17 @@ struct request *blk_fetch_request(struct request_queue *q)
 	struct request *rq;
 
 	rq = blk_peek_request(q);
-	if (rq)
-		blk_start_request(rq);
+    if (rq) {
+        /*
+         * Assumption: the next request fetched from scheduler after we
+         * notified "urgent request pending" - will be the urgent one
+         */
+        if (q->notified_urgent && !q->dispatched_urgent) {
+            q->dispatched_urgent = true;
+            (void)blk_mark_rq_urgent(rq);
+        }
+ 		blk_start_request(rq);
+    }
 	return rq;
 }
 EXPORT_SYMBOL(blk_fetch_request);
