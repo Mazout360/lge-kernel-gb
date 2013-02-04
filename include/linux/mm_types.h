@@ -22,7 +22,7 @@
 
 struct address_space;
 
-#define USE_SPLIT_PTLOCKS	(NR_CPUS >= CONFIG_SPLIT_PTLOCK_CPUS)struct
+#define USE_SPLIT_PTLOCKS	(NR_CPUS >= CONFIG_SPLIT_PTLOCK_CPUS)
 
 /*
  * Each physical page in the system has a struct page associated with
@@ -194,15 +194,22 @@ struct core_state {
 };
 
 enum {
-    MM_FILEPAGES,
-    MM_ANONPAGES,
-    MM_SWAPENTS,
-    NR_MM_COUNTERS
+    MM_FILEPAGES,  /* file's rss is MM_FILEPAGES + MM_LOW_FILEPAGES */
+    MM_ANONPAGES,   /* anon`'s rss is MM_FILEPAGES + MM_LOW_FILEPAGES */
+    MM_FILE_LOWPAGES, /* pages from lower zones in file rss*/
+    MM_ANON_LOWPAGES, /* pages from lower zones in anon rss*/
 };
+#define LOWMEM_COUNTER  2
 
 #if USE_SPLIT_PTLOCKS
+#define SPLIT_RSS_COUNTING
 struct mm_rss_stat {
     atomic_long_t count[NR_MM_COUNTERS];
+};
+/* per-thread cached information, */
+struct task_rss_stat {
+    int events;  /* for synchronization threshold */
+    int count[NR_MM_COUNTERS];
 };
 #else  /* !USE_SPLIT_PTLOCKS */
 struct mm_rss_stat {
