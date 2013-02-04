@@ -1278,9 +1278,6 @@ int __kvm_set_memory_region(struct kvm *kvm,
 		if (!new.lpage_info[i])
 			goto out_free;
 
-		memset(new.lpage_info[i], 0,
-		       lpages * sizeof(*new.lpage_info[i]));
-
 		if (base_gfn % KVM_PAGES_PER_HPAGE(level))
 			new.lpage_info[i][0].write_count = 1;
 		if ((base_gfn+npages) % KVM_PAGES_PER_HPAGE(level))

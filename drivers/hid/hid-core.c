@@ -665,7 +665,6 @@ int hid_parse_report(struct hid_device *device, __u8 *start,
 		goto err;
 	}
 
-	memset(parser, 0, sizeof(struct hid_parser));
 	parser->device = device;
 
 	end = start + size;

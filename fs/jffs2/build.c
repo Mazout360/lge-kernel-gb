@@ -342,7 +342,6 @@ int jffs2_do_mount_fs(struct jffs2_sb_info *c)
 	if (!c->blocks)
 		return -ENOMEM;
 
-	memset(c->blocks, 0, size);
 	for (i=0; i<c->nr_blocks; i++) {
 		INIT_LIST_HEAD(&c->blocks[i].list);
 		c->blocks[i].offset = i * c->sector_size;
