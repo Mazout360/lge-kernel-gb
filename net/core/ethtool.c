@@ -311,7 +311,7 @@ static int ethtool_get_regs(struct net_device *dev, char __user *useraddr)
 	if (regs.len > reglen)
 		regs.len = reglen;
 
-	regbuf = kzalloc(reglen, GFP_USER);
+	regbuf = vzalloc(reglen);
 	if (!regbuf)
 		return -ENOMEM;
 

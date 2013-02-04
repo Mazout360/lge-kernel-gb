@@ -93,7 +93,7 @@ static int nvhost_channelopen(struct inode *inode, struct file *filp)
 	if (IS_ERR(ch))
 		return PTR_ERR(ch);
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = vzalloc(sizeof(*priv));
 	if (!priv) {
 		nvhost_putchannel(ch, NULL);
 		return -ENOMEM;

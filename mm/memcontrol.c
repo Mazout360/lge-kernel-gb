@@ -3609,7 +3609,7 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	if (size < PAGE_SIZE)
 		mem = kmalloc(size, GFP_KERNEL);
 	else
-		mem = vmalloc(size);
+		mem = vzalloc(size);
 
 	if (mem)
 		memset(mem, 0, size);
