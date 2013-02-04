@@ -176,6 +176,7 @@ int zlib_deflateInit2(
     deflate_state *s;
     int noheader = 0;
     deflate_workspace *mem;
+    char *next;
 
     ush *overlay;
     /* We overlay pending_buf and d_buf+l_buf. This works since the average
@@ -199,6 +200,21 @@ int zlib_deflateInit2(
 	strategy < 0 || strategy > Z_HUFFMAN_ONLY) {
         return Z_STREAM_ERROR;
     }
+    
+    /*
+     * Direct the workspace's pointers to the chunks that were allocated
+     * along with the deflate_workspace struct.
+     */
+    next = (char *) mem;
+    next += sizeof(*mem);
+    mem->window_memory = (Byte *) next;
+    next += zlib_deflate_window_memsize(windowBits);
+    mem->prev_memory = (Pos *) next;
+    next += zlib_deflate_prev_memsize(windowBits);
+    mem->head_memory = (Pos *) next;
+    next += zlib_deflate_head_memsize(memLevel);
+    mem->overlay_memory = next;
+    
     s = (deflate_state *) &(mem->deflate_memory);
     strm->state = (struct internal_state *)s;
     s->strm = strm;
@@ -1249,5 +1265,20 @@ static block_state deflate_slow(
 
 int zlib_deflate_workspacesize(void)
 {
-    return sizeof(deflate_workspace);
+    return zlib_deflate_workspacesize2(MAX_WBITS, MAX_MEM_LEVEL);
+}
+
+int zlib_deflate_workspacesize2(int windowBits, int memLevel)
+{
+    if (windowBits < 0) /* undocumented feature: suppress zlib header */
+        windowBits = -windowBits;
+        if (memLevel < 1 || memLevel > MAX_MEM_LEVEL ||
+                 windowBits < 9 || windowBits > 15)
+            return -1;
+    
+    return sizeof(deflate_workspace)
+    + zlib_deflate_window_memsize(windowBits)
+    + zlib_deflate_prev_memsize(windowBits)
+    + zlib_deflate_head_memsize(memLevel)
+    + zlib_deflate_overlay_memsize(memLevel);
 }
