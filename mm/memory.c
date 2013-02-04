@@ -136,7 +136,7 @@ void __sync_task_rss_stat(struct task_struct *task, struct mm_struct *mm)
 	task->rss_stat.events = 0;
 }
 
-static void add_mm_counter_fast(struct mm_struct *mm, int member, int val)
+static void __add_mm_counter_fast(struct mm_struct *mm, int member, int val)
 {
 	struct task_struct *task = current;
     
@@ -145,8 +145,19 @@ static void add_mm_counter_fast(struct mm_struct *mm, int member, int val)
 	else
 		add_mm_counter(mm, member, val);
 }
-#define inc_mm_counter_fast(mm, member) add_mm_counter_fast(mm, member,1)
-#define dec_mm_counter_fast(mm, member) add_mm_counter_fast(mm, member,-1)
+
+static void add_mm_counter_fast(struct mm_struct *mm, int member,
+                                int val, struct page *page)
+{
+    if (is_lowmem_page(page))
+        member += LOWMEM_COUNTER;
+        __add_mm_counter_fast(mm, member, val);
+}
+
+#define inc_mm_counter_fast(mm, member, page)\
+    add_mm_counter_fast(mm, member,1, page)
+#define dec_mm_counter_fast(mm, member, page)\
+    add_mm_counter_fast(mm, member,-1, page)
 
 /* sync counter once per 64 page faults */
 #define TASK_RSS_EVENTS_THRESH	(64)
@@ -182,8 +193,9 @@ void sync_mm_rss(struct task_struct *task, struct mm_struct *mm)
 }
 #else
 
-#define inc_mm_counter_fast(mm, member) inc_mm_counter(mm, member)
-#define dec_mm_counter_fast(mm, member) dec_mm_counter(mm, member)
+#define inc_mm_counter_fast(mm, member, page) inc_mm_counter_page(mm, member, page)
+#define dec_mm_counter_fast(mm, member, page) dec_mm_counter_page(mm, member, page)
+#define __add_mm_counter_fast(mm, member, val) add_mm_counter(mm, member, val)
 
 static void check_sync_rss_stat(struct task_struct *task)
 {
@@ -194,6 +206,28 @@ void sync_mm_rss(struct task_struct *task, struct mm_struct *mm)
 }
 #endif
 
+unsigned long get_file_rss(struct mm_struct *mm)
+{
+    return get_mm_counter(mm, MM_ANONPAGES)
+        + get_mm_counter(mm, MM_ANON_LOWPAGES);
+
+}
+unsigned long get_anon_rss(struct mm_struct *mm)
+{
+    return get_mm_counter(mm, MM_FILEPAGES)
+        + get_mm_counter(mm, MM_FILE_LOWPAGES);
+}
+
+unsigned long get_low_rss(struct mm_struct *mm)
+{
+    return get_mm_counter(mm, MM_ANON_LOWPAGES)
+        + get_mm_counter(mm, MM_FILE_LOWPAGES);
+}
+
+unsigned long get_mm_rss(struct mm_struct *mm)
+{
+    return get_file_rss(mm) + get_anon_rss(mm);
+}
 /*
  * If a p?d_bad entry is found while walking page tables, report
  * the error, before resetting entry to p?d_none.  Usually (but
@@ -711,12 +745,16 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 
 	page = vm_normal_page(vma, addr, pte);
 	if (page) {
+        int type;
 		get_page(page);
 		page_dup_rmap(page);
 		if (PageAnon(page))
-            rss[MM_ANONPAGES]++;
+            type = MM_ANONPAGES;
         else
-            rss[MM_FILEPAGES]++;
+            type = MM_FILEPAGES;
+        if (is_lowmem_page(page))
+            type += LOWMEM_COUNTER;
+        rss[type]++;
 	}
 
 out_set_pte:
@@ -732,7 +770,8 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	spinlock_t *src_ptl, *dst_ptl;
 	int progress = 0;
 	int rss[NR_MM_COUNTERS];
-
+    int type;
+    
 again:
 	init_rss_vec(rss);
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
@@ -937,15 +976,18 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				set_pte_at(mm, addr, pte,
 					   pgoff_to_pte(page->index));
 			if (PageAnon(page))
-				rss[MM_ANONPAGES]--;
+				type = MM_ANONPAGES;
 			else {
 				if (pte_dirty(ptent))
 					set_page_dirty(page);
 				if (pte_young(ptent) &&
 				    likely(!VM_SequentialReadHint(vma)))
 					mark_page_accessed(page);
-				rss[MM_FILEPAGES]--;
+				type = MM_FILEPAGES;
 			}
+            if (is_lowmem_page(page))
+                type += LOWMEM_COUNTER;
+            rss[type]--;
 			page_remove_rmap(page);
 			if (unlikely(page_mapcount(page) < 0))
 				print_bad_pte(vma, addr, ptent, page);
@@ -1616,7 +1658,7 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 
 	/* Ok, finally just insert the thing.. */
 	get_page(page);
-	inc_mm_counter_fast(mm, MM_FILEPAGES);
+	inc_mm_counter_fast(mm, MM_FILEPAGES, page);
 	page_add_file_rmap(page);
 	set_pte_at(mm, addr, pte, mk_pte(page, prot));
 
@@ -2252,11 +2294,11 @@ gotten:
 	if (likely(pte_same(*page_table, orig_pte))) {
 		if (old_page) {
 			if (!PageAnon(old_page)) {
-				dec_mm_counter_fast(mm, MM_FILEPAGES);
-                inc_mm_counter_fast(mm, MM_ANONPAGES);
+				dec_mm_counter_fast(mm, MM_FILEPAGES, old_page);
+                inc_mm_counter_fast(mm, MM_ANONPAGES, new_page);
 			}
 		} else
-			inc_mm_counter_fast(mm, MM_ANONPAGES);
+			inc_mm_counter_fast(mm, MM_ANONPAGES, new_page);
 		flush_cache_page(vma, address, pte_pfn(orig_pte));
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		entry = maybe_mkwrite(pte_mkdirty(entry), vma);
@@ -2690,8 +2732,9 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * discarded at swap_free().
 	 */
 
-	inc_mm_counter_fast(mm, MM_ANONPAGES);
-    dec_mm_counter_fast(mm, MM_SWAPENTS);
+	inc_mm_counter_fast(mm, MM_ANONPAGES, page);
+    /* SWAPENTS counter is not related to page..then use bare call */
+    __add_mm_counter_fast(mm, MM_SWAPENTS, -1);
 	pte = mk_pte(page, vma->vm_page_prot);
 	if ((flags & FAULT_FLAG_WRITE) && reuse_swap_page(page)) {
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
@@ -2813,7 +2856,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (!pte_none(*page_table))
 		goto release;
 
-	inc_mm_counter_fast(mm, MM_ANONPAGES);
+	inc_mm_counter_fast(mm, MM_ANONPAGES, page);
 	page_add_new_anon_rmap(page, vma, address);
 setpte:
 	set_pte_at(mm, address, page_table, entry);
@@ -2968,10 +3011,10 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		if (flags & FAULT_FLAG_WRITE)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		if (anon) {
-			inc_mm_counter_fast(mm, MM_ANONPAGES);
+			inc_mm_counter_fast(mm, MM_ANONPAGES, page);
 			page_add_new_anon_rmap(page, vma, address);
 		} else {
-			inc_mm_counter_fast(mm, MM_FILEPAGES);
+			inc_mm_counter_fast(mm, MM_FILEPAGES, page);
 			page_add_file_rmap(page);
 			if (flags & FAULT_FLAG_WRITE) {
 				dirty_page = page;
