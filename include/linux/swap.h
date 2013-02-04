@@ -179,6 +179,8 @@ struct swap_info_struct {
 	unsigned int max;
 	unsigned int inuse_pages;
 	unsigned int old_block_size;
+    unsigned long *frontswap_map;  /* frontswap in-use, one bit per page */
+    unsigned int frontswap_pages;  /* frontswap pages in-use counter */
 };
 
 struct swap_list_t {
