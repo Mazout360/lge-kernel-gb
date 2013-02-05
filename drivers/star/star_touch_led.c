@@ -468,11 +468,12 @@ static struct platform_driver touchLED_driver = {
 // 20100820  LGE Touch LED Control [START]
 void touchLED_enable(NvBool status)
 {
+    if(s_touchLED.setVal !=0) {
 	if(s_touchLED.is_working)
     touchLED_Control(status);
+    }
 }
 // 20100820  LGE Touch LED Control [END]
-
 
 EXPORT_SYMBOL_GPL(touchLED_enable);
 
