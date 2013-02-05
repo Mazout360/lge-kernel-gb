@@ -189,7 +189,7 @@ extern int zlib_deflate_workspacesize2 (int windowBits, int memLevel);
      passed here.
   */
 
-extern int zlib_deflate_workspacesize (int windowBits, int memLevel);
+extern int zlib_deflate_workspacesize (void);
 /*
    Returns the number of bytes that needs to be allocated for a per-
    stream workspace with the default (large) windowBits and memLevel

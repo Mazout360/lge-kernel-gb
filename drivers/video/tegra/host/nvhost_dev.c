@@ -24,6 +24,7 @@
 
 #include <linux/nvhost.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/spinlock.h>
 #include <linux/fs.h>
