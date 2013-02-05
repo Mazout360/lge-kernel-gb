@@ -31,6 +31,16 @@ config IOSCHED_DEADLINE
 	  a disk at any one time, its behaviour is almost identical to the
 	  anticipatory I/O scheduler and so is a good choice.
 
+config IOSCHED_SIO
+	tristate "Simple I/O scheduler"
+	default y
+	---help---
+	  The Simple I/O scheduler is an extremely simple scheduler,
+	  based on noop and deadline, that relies on deadlines to
+	  ensure fairness. The algorithm does not do any sorting but
+	  basic merging, trying to keep a minimum overhead. It is aimed
+	  mainly for aleatory access devices (eg: flash devices).
+
 config IOSCHED_ROW
 	tristate "ROW I/O scheduler"
 	---help---
@@ -100,6 +110,9 @@ choice
 		for each queue is defined according to queue priority.
 		Most suitable for mobile devices.
 
+	config DEFAULT_SIO
+		bool "SIO" if IOSCHED_SIO=y
+
 	config DEFAULT_CFQ
 		bool "CFQ" if IOSCHED_CFQ=y
 
@@ -116,6 +129,7 @@ config DEFAULT_IOSCHED
 	default "anticipatory" if DEFAULT_AS
 	default "deadline" if DEFAULT_DEADLINE
 	default "cfq" if DEFAULT_CFQ
+	default "sio" if DEFAULT_SIO
 	default "bfq" if DEFAULT_BFQ
 	default "noop" if DEFAULT_NOOP
 	default "row" if DEFAULT_ROW
