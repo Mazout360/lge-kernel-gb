@@ -167,8 +167,7 @@ static int rcu_preempted_readers(struct rcu_node *rnp)
  * irqs disabled, and this lock is released upon return, but irqs remain
  * disabled.
  */
-static void task_quiet(struct rcu_node *rnp, unsigned long flags)
-__releases(rnp->lock)
+static void rcu_report_unblock_qs_rnp(struct rcu_node *rnp, unsigned long flags)__releases(rnp->lock)
 {
 	unsigned long mask;
 	struct rcu_node *rnp_p;
@@ -185,7 +184,7 @@ __releases(rnp->lock)
 		 * or tasks were kicked up to root rcu_node due to
 		 * CPUs going offline.
 		 */
-		cpu_quiet_msk_finish(&rcu_preempt_state, flags);
+		rcu_report_qs_rsp(&rcu_preempt_state, flags);
 		return;
 	}
     
@@ -193,7 +192,7 @@ __releases(rnp->lock)
 	mask = rnp->grpmask;
 	spin_unlock(&rnp->lock);	/* irqs remain disabled. */
 	spin_lock(&rnp_p->lock);	/* irqs already disabled. */
-	cpu_quiet_msk(mask, &rcu_preempt_state, rnp_p, flags);
+	rcu_report_qs_rnp(mask, &rcu_preempt_state, rnp_p, flags);
 }
 
 /*
@@ -264,7 +263,7 @@ static void rcu_read_unlock_special(struct task_struct *t)
 			return;
 		}
     else
-        task_quiet(rnp, flags);
+        rcu_report_unblock_qs_rnp(rnp, flags);
     } else {
         local_irq_restore(flags);
 	}
@@ -572,7 +571,7 @@ static int rcu_preempted_readers(struct rcu_node *rnp)
 
 #ifdef CONFIG_HOTPLUG_CPU
 /* Because preemptible RCU does not exist, no quieting of tasks. */
-static void task_quiet(struct rcu_node *rnp, unsigned long flags)
+static void rcu_report_unblock_qs_rnp(struct rcu_node *rnp, unsigned long flags)
 {
     spin_unlock_irqrestore(&rnp->lock, flags);
 }

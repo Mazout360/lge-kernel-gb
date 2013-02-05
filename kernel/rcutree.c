@@ -685,7 +685,6 @@ rcu_start_gp(struct rcu_state *rsp, unsigned long flags)
 	rsp->signaled = RCU_GP_INIT; /* Hold off force_quiescent_state. */
 	rsp->jiffies_force_qs = jiffies + RCU_JIFFIES_TILL_FORCE_QS;
 	record_gp_stall_check_time(rsp);
-	dyntick_record_completed(rsp, rsp->completed - 1);
 
 	/* Special-case the common single-level case. */
 	if (NUM_RCU_NODES == 1) {
@@ -741,12 +740,14 @@ rcu_start_gp(struct rcu_state *rsp, unsigned long flags)
 }
 
 /*
- * Clean up after the prior grace period and let rcu_start_gp() start up
- * the next grace period if one is needed.  Note that the caller must
- * hold rnp->lock, as required by rcu_start_gp(), which will release it.
+ * Report a full set of quiescent states to the specified rcu_state
+ * data structure.  This involves cleaning up after the prior grace
+ * period and letting rcu_start_gp() start up the next grace period
+ * if one is needed.  Note that the caller must hold rnp->lock, as
+ * required by rcu_start_gp(), which will release it.
  */
-static void cpu_quiet_msk_finish(struct rcu_state *rsp, unsigned long flags)
-	__releases(rcu_get_root(rsp)->lock)
+static void rcu_report_qs_rsp(struct rcu_state *rsp, unsigned long flags)
+__releases(rcu_get_root(rsp)->lock)
 {
 	WARN_ON_ONCE(!rcu_gp_in_progress(rsp));
 	rsp->completed = rsp->gpnum;
@@ -755,16 +756,17 @@ static void cpu_quiet_msk_finish(struct rcu_state *rsp, unsigned long flags)
 }
 
 /*
- * Similar to cpu_quiet(), for which it is a helper function.  Allows
- * a group of CPUs to be quieted at one go, though all the CPUs in the
- * group must be represented by the same leaf rcu_node structure.
- * That structure's lock must be held upon entry, and it is released
- * before return.
+ * Similar to rcu_report_qs_rdp(), for which it is a helper function.
+ * Allows quiescent states for a group of CPUs to be reported at one go
+ * to the specified rcu_node structure, though all the CPUs in the group
+ * must be represented by the same rcu_node structure (which need not be
+ * a leaf rcu_node structure, though it often will be).  That structure's
+ * lock must be held upon entry, and it is released before return.
  */
 static void
-cpu_quiet_msk(unsigned long mask, struct rcu_state *rsp, struct rcu_node *rnp,
-	      unsigned long flags)
-	__releases(rnp->lock)
+rcu_report_qs_rnp(unsigned long mask, struct rcu_state *rsp,
+                  struct rcu_node *rnp, unsigned long flags)
+                    __releases(rnp->lock)
 {
 	struct rcu_node *rnp_c;
 
@@ -799,10 +801,10 @@ cpu_quiet_msk(unsigned long mask, struct rcu_state *rsp, struct rcu_node *rnp,
 
 	/*
 	 * Get here if we are the last CPU to pass through a quiescent
-	 * state for this grace period.  Invoke cpu_quiet_msk_finish()
+	 * state for this grace period.  Invoke rcu_report_qs_rsp()
 	 * to clean up and start the next grace period if one is needed.
 	 */
-	cpu_quiet_msk_finish(rsp, flags); /* releases rnp->lock. */
+	rcu_report_qs_rsp(rsp, flags); /* releases rnp->lock. */
 }
 
 /*
@@ -813,7 +815,7 @@ cpu_quiet_msk(unsigned long mask, struct rcu_state *rsp, struct rcu_node *rnp,
  * period!
  */
 static void
-cpu_quiet(int cpu, struct rcu_state *rsp, struct rcu_data *rdp, long lastcomp)
+rcu_report_qs_rdp(int cpu, struct rcu_state *rsp, struct rcu_data *rdp, long lastcomp)
 {
 	unsigned long flags;
 	unsigned long mask;
@@ -847,7 +849,7 @@ cpu_quiet(int cpu, struct rcu_state *rsp, struct rcu_data *rdp, long lastcomp)
 		 */
 		rdp->nxttail[RCU_NEXT_READY_TAIL] = rdp->nxttail[RCU_NEXT_TAIL];
 
-		cpu_quiet_msk(mask, rsp, rnp, flags); /* releases rnp->lock */
+		rcu_report_qs_rnp(mask, rsp, rnp, flags); /* rlses rnp->lock */
 	}
 }
 
@@ -879,7 +881,7 @@ rcu_check_quiescent_state(struct rcu_state *rsp, struct rcu_data *rdp)
 		return;
 
 	/* Tell RCU we are done (but cpu_quiet() will be the judge of that). */
-	cpu_quiet(rdp->cpu, rsp, rdp, rdp->passed_quiesc_completed);
+	rcu_report_qs_rdp(rdp->cpu, rsp, rdp, rdp->passed_quiesc_completed);
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -976,7 +978,7 @@ static void __rcu_offline_cpu(int cpu, struct rcu_state *rsp)
     spin_unlock(&rsp->onofflock); /* irqs remain disabled. */
     rnp = rdp->mynode;
     if (need_quiet)
-        task_quiet(rnp, flags);
+        rcu_report_unblock_qs_rnp(rnp, flags);
     else
         spin_unlock_irqrestore(&rnp->lock, flags);
 
@@ -1167,7 +1169,7 @@ static int rcu_process_dyntick(struct rcu_state *rsp, long lastcomp,
 		if (mask != 0 && rnp->completed == lastcomp) {
 
 			/* cpu_quiet_msk() releases rnp->lock. */
-			cpu_quiet_msk(mask, rsp, rnp, flags);
+			rcu_report_qs_rnp(mask, rsp, rnp, flags);
 			continue;
 		}
 		spin_unlock_irqrestore(&rnp->lock, flags);

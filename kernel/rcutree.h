@@ -264,8 +264,8 @@ struct rcu_state {
 	long orphan_qlen;			/* Number of orphaned cbs. */
 	spinlock_t fqslock;			/* Only one task forcing */
 						/*  quiescent states. */
-    long dynticks_completed;		/* Value of completed @ snap. */
-    /*  Protected by fqslock. */
+    long  completed_fqs;      /* Value of completed @ snap. */
+        /*  Protected by fqslock. */
 	unsigned long jiffies_force_qs;		/* Time at which to invoke */
 						/*  force_quiescent_state(). */
 	unsigned long n_force_qs;		/* Number of calls to */
