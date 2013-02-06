@@ -616,7 +616,7 @@ ssize_t wlp_wss_attr_store(struct kobject *kobj, struct attribute *attr,
 }
 
 static
-struct sysfs_ops wss_sysfs_ops = {
+const struct sysfs_ops wss_sysfs_ops = {
 	.show	= wlp_wss_attr_show,
 	.store	= wlp_wss_attr_store,
 };
