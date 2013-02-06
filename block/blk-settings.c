@@ -8,7 +8,6 @@
 #include <linux/blkdev.h>
 #include <linux/bootmem.h>	/* for max_pfn/max_low_pfn */
 #include <linux/gcd.h>
-#include <linux/lcm.h>
 
 #include "blk.h"
 
@@ -81,18 +80,6 @@ void blk_queue_lld_busy(struct request_queue *q, lld_busy_fn *fn)
 EXPORT_SYMBOL_GPL(blk_queue_lld_busy);
 
 /**
- * blk_urgent_request() - Set an urgent_request handler function for queue
- * @q:    queue
- * @fn:    handler for urgent requests
- *
- */
-void blk_urgent_request(struct request_queue *q, request_fn_proc *fn)
-{
-    q->urgent_request_fn = fn;
-}
-EXPORT_SYMBOL(blk_urgent_request);
-
-/**
  * blk_set_default_limits - reset limits to default values
  * @lim:  the queue_limits structure to reset
  *
@@ -109,13 +96,16 @@ void blk_set_default_limits(struct queue_limits *lim)
 	lim->max_segment_size = MAX_SEGMENT_SIZE;
 	lim->max_sectors = BLK_DEF_MAX_SECTORS;
 	lim->max_hw_sectors = INT_MAX;
-	lim->max_discard_sectors = SAFE_MAX_SECTORS;
+	lim->max_discard_sectors = 0;
+	lim->discard_granularity = 0;
+	lim->discard_alignment = 0;
+	lim->discard_misaligned = 0;
 	lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
 	lim->bounce_pfn = (unsigned long)(BLK_BOUNCE_ANY >> PAGE_SHIFT);
 	lim->alignment_offset = 0;
 	lim->io_opt = 0;
 	lim->misaligned = 0;
-	lim->cluster = 1;
+	lim->no_cluster = 0;
 }
 EXPORT_SYMBOL(blk_set_default_limits);
 
@@ -147,30 +137,30 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	 * set defaults
 	 */
 	q->nr_requests = BLKDEV_MAX_RQ;
-
+    
 	q->make_request_fn = mfn;
 	blk_queue_dma_alignment(q, 511);
 	blk_queue_congestion_threshold(q);
 	q->nr_batching = BLK_BATCH_REQ;
-
+    
 	q->unplug_thresh = 4;		/* hmm */
 	q->unplug_delay = (3 * HZ) / 1000;	/* 3 milliseconds */
 	if (q->unplug_delay == 0)
 		q->unplug_delay = 1;
-
+    
 	q->unplug_timer.function = blk_unplug_timeout;
 	q->unplug_timer.data = (unsigned long)q;
-
+    
 	blk_set_default_limits(&q->limits);
 	blk_queue_max_sectors(q, SAFE_MAX_SECTORS);
-
+    
 	/*
 	 * If the caller didn't supply a lock, fall back to our embedded
 	 * per-queue locks
 	 */
 	if (!q->queue_lock)
 		q->queue_lock = &q->__queue_lock;
-
+    
 	/*
 	 * by default assume old behaviour and bounce for any highmem page
 	 */
@@ -193,7 +183,7 @@ void blk_queue_bounce_limit(struct request_queue *q, u64 dma_mask)
 {
 	unsigned long b_pfn = dma_mask >> PAGE_SHIFT;
 	int dma = 0;
-
+    
 	q->bounce_gfp = GFP_NOIO;
 #if BITS_PER_LONG == 64
 	/*
@@ -233,7 +223,7 @@ void blk_queue_max_sectors(struct request_queue *q, unsigned int max_sectors)
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_sectors);
 	}
-
+    
 	if (BLK_DEF_MAX_SECTORS > max_sectors)
 		q->limits.max_hw_sectors = q->limits.max_sectors = max_sectors;
 	else {
@@ -258,7 +248,7 @@ EXPORT_SYMBOL(blk_queue_max_hw_sectors);
  * @max_discard_sectors: maximum number of sectors to discard
  **/
 void blk_queue_max_discard_sectors(struct request_queue *q,
-		unsigned int max_discard_sectors)
+                                   unsigned int max_discard_sectors)
 {
 	q->limits.max_discard_sectors = max_discard_sectors;
 }
@@ -275,14 +265,14 @@ EXPORT_SYMBOL(blk_queue_max_discard_sectors);
  *    scatter list the driver could handle.
  **/
 void blk_queue_max_phys_segments(struct request_queue *q,
-				 unsigned short max_segments)
+                                 unsigned short max_segments)
 {
 	if (!max_segments) {
 		max_segments = 1;
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_segments);
 	}
-
+    
 	q->limits.max_phys_segments = max_segments;
 }
 EXPORT_SYMBOL(blk_queue_max_phys_segments);
@@ -299,14 +289,14 @@ EXPORT_SYMBOL(blk_queue_max_phys_segments);
  *    to the device.
  **/
 void blk_queue_max_hw_segments(struct request_queue *q,
-			       unsigned short max_segments)
+                               unsigned short max_segments)
 {
 	if (!max_segments) {
 		max_segments = 1;
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_segments);
 	}
-
+    
 	q->limits.max_hw_segments = max_segments;
 }
 EXPORT_SYMBOL(blk_queue_max_hw_segments);
@@ -327,7 +317,7 @@ void blk_queue_max_segment_size(struct request_queue *q, unsigned int max_size)
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_size);
 	}
-
+    
 	q->limits.max_segment_size = max_size;
 }
 EXPORT_SYMBOL(blk_queue_max_segment_size);
@@ -345,10 +335,10 @@ EXPORT_SYMBOL(blk_queue_max_segment_size);
 void blk_queue_logical_block_size(struct request_queue *q, unsigned short size)
 {
 	q->limits.logical_block_size = size;
-
+    
 	if (q->limits.physical_block_size < size)
 		q->limits.physical_block_size = size;
-
+    
 	if (q->limits.io_min < q->limits.physical_block_size)
 		q->limits.io_min = q->limits.physical_block_size;
 }
@@ -364,13 +354,13 @@ EXPORT_SYMBOL(blk_queue_logical_block_size);
  *   hardware can operate on without reverting to read-modify-write
  *   operations.
  */
-void blk_queue_physical_block_size(struct request_queue *q, unsigned int size)
+void blk_queue_physical_block_size(struct request_queue *q, unsigned short size)
 {
 	q->limits.physical_block_size = size;
-
+    
 	if (q->limits.physical_block_size < q->limits.logical_block_size)
 		q->limits.physical_block_size = q->limits.logical_block_size;
-
+    
 	if (q->limits.io_min < q->limits.physical_block_size)
 		q->limits.io_min = q->limits.physical_block_size;
 }
@@ -390,7 +380,7 @@ EXPORT_SYMBOL(blk_queue_physical_block_size);
 void blk_queue_alignment_offset(struct request_queue *q, unsigned int offset)
 {
 	q->limits.alignment_offset =
-		offset & (q->limits.physical_block_size - 1);
+    offset & (q->limits.physical_block_size - 1);
 	q->limits.misaligned = 0;
 }
 EXPORT_SYMBOL(blk_queue_alignment_offset);
@@ -409,10 +399,10 @@ EXPORT_SYMBOL(blk_queue_alignment_offset);
 void blk_limits_io_min(struct queue_limits *limits, unsigned int min)
 {
 	limits->io_min = min;
-
+    
 	if (limits->io_min < limits->logical_block_size)
 		limits->io_min = limits->logical_block_size;
-
+    
 	if (limits->io_min < limits->physical_block_size)
 		limits->io_min = limits->physical_block_size;
 }
@@ -489,143 +479,111 @@ EXPORT_SYMBOL(blk_queue_io_opt);
 void blk_queue_stack_limits(struct request_queue *t, struct request_queue *b)
 {
 	blk_stack_limits(&t->limits, &b->limits, 0);
+    
+	if (!t->queue_lock)
+		WARN_ON_ONCE(1);
+	else if (!test_bit(QUEUE_FLAG_CLUSTER, &b->queue_flags)) {
+		unsigned long flags;
+		spin_lock_irqsave(t->queue_lock, flags);
+		queue_flag_clear(QUEUE_FLAG_CLUSTER, t);
+		spin_unlock_irqrestore(t->queue_lock, flags);
+	}
 }
 EXPORT_SYMBOL(blk_queue_stack_limits);
 
+static unsigned int lcm(unsigned int a, unsigned int b)
+{
+	if (a && b)
+		return (a * b) / gcd(a, b);
+	else if (b)
+		return b;
+    
+	return a;
+}
+
 /**
  * blk_stack_limits - adjust queue_limits for stacked devices
- * @t:	the stacking driver limits (top device)
- * @b:  the underlying queue limits (bottom, component device)
+ * @t:	the stacking driver limits (top)
+ * @b:  the underlying queue limits (bottom)
  * @offset:  offset to beginning of data within component device
  *
  * Description:
- *    This function is used by stacking drivers like MD and DM to ensure
- *    that all component devices have compatible block sizes and
- *    alignments.  The stacking driver must provide a queue_limits
- *    struct (top) and then iteratively call the stacking function for
- *    all component (bottom) devices.  The stacking function will
- *    attempt to combine the values and ensure proper alignment.
- *
- *    Returns 0 if the top and bottom queue_limits are compatible.  The
- *    top device's block sizes and alignment offsets may be adjusted to
- *    ensure alignment with the bottom device. If no compatible sizes
- *    and alignments exist, -1 is returned and the resulting top
- *    queue_limits will have the misaligned flag set to indicate that
- *    the alignment_offset is undefined.
+ *    Merges two queue_limit structs.  Returns 0 if alignment didn't
+ *    change.  Returns -1 if adding the bottom device caused
+ *    misalignment.
  */
 int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
-		     sector_t offset)
+                     sector_t offset)
 {
-	sector_t alignment;
-	unsigned int top, bottom, ret = 0;
-
+	int ret;
+    
+	ret = 0;
+    
 	t->max_sectors = min_not_zero(t->max_sectors, b->max_sectors);
 	t->max_hw_sectors = min_not_zero(t->max_hw_sectors, b->max_hw_sectors);
 	t->bounce_pfn = min_not_zero(t->bounce_pfn, b->bounce_pfn);
-
+    
 	t->seg_boundary_mask = min_not_zero(t->seg_boundary_mask,
-					    b->seg_boundary_mask);
-
+                                        b->seg_boundary_mask);
+    
 	t->max_phys_segments = min_not_zero(t->max_phys_segments,
-					    b->max_phys_segments);
-
+                                        b->max_phys_segments);
+    
 	t->max_hw_segments = min_not_zero(t->max_hw_segments,
-					  b->max_hw_segments);
-
+                                      b->max_hw_segments);
+    
 	t->max_segment_size = min_not_zero(t->max_segment_size,
-					   b->max_segment_size);
-
-	t->misaligned |= b->misaligned;
-
-	alignment = queue_limit_alignment_offset(b, offset);
-
-	/* Bottom device has different alignment.  Check that it is
-	 * compatible with the current top alignment.
-	 */
-	if (t->alignment_offset != alignment) {
-
-		top = max(t->physical_block_size, t->io_min)
-			+ t->alignment_offset;
-		bottom = max(b->physical_block_size, b->io_min) + alignment;
-
-		/* Verify that top and bottom intervals line up */
-		if (max(top, bottom) & (min(top, bottom) - 1)) {
-			t->misaligned = 1;
-			ret = -1;
-		}
-	}
-
+                                       b->max_segment_size);
+    
 	t->logical_block_size = max(t->logical_block_size,
-				    b->logical_block_size);
-
+                                b->logical_block_size);
+    
 	t->physical_block_size = max(t->physical_block_size,
-				     b->physical_block_size);
-
+                                 b->physical_block_size);
+    
 	t->io_min = max(t->io_min, b->io_min);
-	t->io_opt = lcm(t->io_opt, b->io_opt);
-
-	t->cluster &= b->cluster;
-
-	/* Physical block size a multiple of the logical block size? */
-	if (t->physical_block_size & (t->logical_block_size - 1)) {
-		t->physical_block_size = t->logical_block_size;
+	t->no_cluster |= b->no_cluster;
+    
+	/* Bottom device offset aligned? */
+	if (offset &&
+	    (offset & (b->physical_block_size - 1)) != b->alignment_offset) {
 		t->misaligned = 1;
 		ret = -1;
 	}
-
-	/* Minimum I/O a multiple of the physical block size? */
-	if (t->io_min & (t->physical_block_size - 1)) {
-		t->io_min = t->physical_block_size;
-		t->misaligned = 1;
+    
+	if (offset &&
+	    (offset & (b->discard_granularity - 1)) != b->discard_alignment) {
+		t->discard_misaligned = 1;
 		ret = -1;
 	}
-
-	/* Optimal I/O a multiple of the physical block size? */
-	if (t->io_opt & (t->physical_block_size - 1)) {
-		t->io_opt = 0;
-		t->misaligned = 1;
-		ret = -1;
-	}
-
-	/* Find lowest common alignment_offset */
-	t->alignment_offset = lcm(t->alignment_offset, alignment)
-		& (max(t->physical_block_size, t->io_min) - 1);
-
-	/* Verify that new alignment_offset is on a logical block boundary */
+    
+	/* If top has no alignment offset, inherit from bottom */
+	if (!t->alignment_offset)
+		t->alignment_offset =
+        b->alignment_offset & (b->physical_block_size - 1);
+    
+	if (!t->discard_alignment)
+		t->discard_alignment =
+        b->discard_alignment & (b->discard_granularity - 1);
+    
+	/* Top device aligned on logical block boundary? */
 	if (t->alignment_offset & (t->logical_block_size - 1)) {
 		t->misaligned = 1;
 		ret = -1;
 	}
-
-	/* Discard */
-	t->max_discard_sectors = min_not_zero(t->max_discard_sectors,
-					      b->max_discard_sectors);
-
+    
+	/* Find lcm() of optimal I/O size and granularity */
+	t->io_opt = lcm(t->io_opt, b->io_opt);
+	t->discard_granularity = lcm(t->discard_granularity,
+                                 b->discard_granularity);
+    
+	/* Verify that optimal I/O size is a multiple of io_min */
+	if (t->io_min && t->io_opt % t->io_min)
+		ret = -1;
+    
 	return ret;
 }
 EXPORT_SYMBOL(blk_stack_limits);
-
-/**
- * bdev_stack_limits - adjust queue limits for stacked drivers
- * @t:	the stacking driver limits (top device)
- * @bdev:  the component block_device (bottom)
- * @start:  first data sector within component device
- *
- * Description:
- *    Merges queue limits for a top device and a block_device.  Returns
- *    0 if alignment didn't change.  Returns -1 if adding the bottom
- *    device caused misalignment.
- */
-int bdev_stack_limits(struct queue_limits *t, struct block_device *bdev,
-		      sector_t start)
-{
-	struct request_queue *bq = bdev_get_queue(bdev);
-
-	start += get_start_sect(bdev);
-
-	return blk_stack_limits(t, &bq->limits, start << 9);
-}
-EXPORT_SYMBOL(bdev_stack_limits);
 
 /**
  * disk_stack_limits - adjust queue limits for stacked drivers
@@ -639,21 +597,32 @@ EXPORT_SYMBOL(bdev_stack_limits);
  *    misalignment.
  */
 void disk_stack_limits(struct gendisk *disk, struct block_device *bdev,
-		       sector_t offset)
+                       sector_t offset)
 {
 	struct request_queue *t = disk->queue;
 	struct request_queue *b = bdev_get_queue(bdev);
-
+    
 	offset += get_start_sect(bdev) << 9;
-
+    
 	if (blk_stack_limits(&t->limits, &b->limits, offset) < 0) {
 		char top[BDEVNAME_SIZE], bottom[BDEVNAME_SIZE];
-
+        
 		disk_name(disk, 0, top);
 		bdevname(bdev, bottom);
-
+        
 		printk(KERN_NOTICE "%s: Warning: Device %s is misaligned\n",
 		       top, bottom);
+	}
+    
+	if (!t->queue_lock)
+		WARN_ON_ONCE(1);
+	else if (!test_bit(QUEUE_FLAG_CLUSTER, &b->queue_flags)) {
+		unsigned long flags;
+        
+		spin_lock_irqsave(t->queue_lock, flags);
+		if (!test_bit(QUEUE_FLAG_CLUSTER, &b->queue_flags))
+			queue_flag_clear(QUEUE_FLAG_CLUSTER, t);
+		spin_unlock_irqrestore(t->queue_lock, flags);
 	}
 }
 EXPORT_SYMBOL(disk_stack_limits);
@@ -715,8 +684,8 @@ EXPORT_SYMBOL(blk_queue_update_dma_pad);
  * buffer.
  */
 int blk_queue_dma_drain(struct request_queue *q,
-			       dma_drain_needed_fn *dma_drain_needed,
-			       void *buf, unsigned int size)
+                        dma_drain_needed_fn *dma_drain_needed,
+                        void *buf, unsigned int size)
 {
 	if (queue_max_hw_segments(q) < 2 || queue_max_phys_segments(q) < 2)
 		return -EINVAL;
@@ -726,7 +695,7 @@ int blk_queue_dma_drain(struct request_queue *q,
 	q->dma_drain_needed = dma_drain_needed;
 	q->dma_drain_buffer = buf;
 	q->dma_drain_size = size;
-
+    
 	return 0;
 }
 EXPORT_SYMBOL_GPL(blk_queue_dma_drain);
@@ -743,7 +712,7 @@ void blk_queue_segment_boundary(struct request_queue *q, unsigned long mask)
 		printk(KERN_INFO "%s: set to minimum %lx\n",
 		       __func__, mask);
 	}
-
+    
 	q->limits.seg_boundary_mask = mask;
 }
 EXPORT_SYMBOL(blk_queue_segment_boundary);
@@ -781,7 +750,7 @@ EXPORT_SYMBOL(blk_queue_dma_alignment);
 void blk_queue_update_dma_alignment(struct request_queue *q, int mask)
 {
 	BUG_ON(mask > PAGE_SIZE);
-
+    
 	if (mask > q->dma_alignment)
 		q->dma_alignment = mask;
 }
