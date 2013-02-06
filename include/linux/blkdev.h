@@ -194,6 +194,11 @@ struct request {
 	struct gendisk *rq_disk;
 	unsigned long start_time;
 
+#ifdef CONFIG_BLK_CGROUP
+    unsigned long long start_time_ns;
+    unsigned long long io_start_time_ns;    /* when passed to hardware */
+#endif
+    
 	/* Number of scatter-gather DMA addr+len pairs after
 	 * physical address coalescing is performed.
 	 */
@@ -316,8 +321,7 @@ struct queue_limits {
     unsigned int    discard_alignment;
 
 	unsigned short		logical_block_size;
-	unsigned short		max_hw_segments;
-	unsigned short		max_phys_segments;
+	unsigned short		max_segments;
 
 	unsigned char		misaligned;
     unsigned char    discard_misaligned;
@@ -947,15 +951,29 @@ extern void blk_abort_queue(struct request_queue *);
  */
 extern struct request_queue *blk_init_queue_node(request_fn_proc *rfn,
 					spinlock_t *lock, int node_id);
+extern struct request_queue *blk_init_allocated_queue_node(struct request_queue *,
+                                                           request_fn_proc *,
+                                                          spinlock_t *, int node_id);
 extern struct request_queue *blk_init_queue(request_fn_proc *, spinlock_t *);
+extern struct request_queue *blk_init_allocated_queue(struct request_queue *,
+                                                      request_fn_proc *, spinlock_t *);
 extern void blk_urgent_request(struct request_queue *q, request_fn_proc *fn);
 extern void blk_cleanup_queue(struct request_queue *);
 extern void blk_queue_make_request(struct request_queue *, make_request_fn *);
 extern void blk_queue_bounce_limit(struct request_queue *, u64);
 extern void blk_queue_max_sectors(struct request_queue *, unsigned int);
 extern void blk_queue_max_hw_sectors(struct request_queue *, unsigned int);
-extern void blk_queue_max_phys_segments(struct request_queue *, unsigned short);
-extern void blk_queue_max_hw_segments(struct request_queue *, unsigned short);
+extern void blk_queue_max_segments(struct request_queue *, unsigned short);
+
+static inline void blk_queue_max_phys_segments(struct request_queue *q, unsigned short max)
+{
+	blk_queue_max_segments(q, max);
+}
+
+static inline void blk_queue_max_hw_segments(struct request_queue *q, unsigned short max)
+{
+	blk_queue_max_segments(q, max);
+}
 extern void blk_queue_max_segment_size(struct request_queue *, unsigned int);
 extern void blk_queue_max_discard_sectors(struct request_queue *q,
 		unsigned int max_discard_sectors);
@@ -1076,14 +1094,9 @@ static inline unsigned int queue_max_hw_sectors(struct request_queue *q)
 	return q->limits.max_hw_sectors;
 }
 
-static inline unsigned short queue_max_hw_segments(struct request_queue *q)
+static inline unsigned short queue_max_segments(struct request_queue *q)
 {
-	return q->limits.max_hw_segments;
-}
-
-static inline unsigned short queue_max_phys_segments(struct request_queue *q)
-{
-	return q->limits.max_phys_segments;
+	return q->limits.max_segments;
 }
 
 static inline unsigned int queue_max_segment_size(struct request_queue *q)
@@ -1235,6 +1248,39 @@ static inline void put_dev_sector(Sector p)
 
 struct work_struct;
 int kblockd_schedule_work(struct request_queue *q, struct work_struct *work);
+
+#ifdef CONFIG_BLK_CGROUP
+static inline void set_start_time_ns(struct request *req)
+{
+	req->start_time_ns = sched_clock();
+}
+
+static inline void set_io_start_time_ns(struct request *req)
+{
+	req->io_start_time_ns = sched_clock();
+}
+
+static inline uint64_t rq_start_time_ns(struct request *req)
+{
+    return req->start_time_ns;
+}
+
+static inline uint64_t rq_io_start_time_ns(struct request *req)
+{
+    return req->io_start_time_ns;
+}
+#else
+static inline void set_start_time_ns(struct request *req) {}
+static inline void set_io_start_time_ns(struct request *req) {}
+static inline uint64_t rq_start_time_ns(struct request *req)
+{
+	return 0;
+}
+static inline uint64_t rq_io_start_time_ns(struct request *req)
+{
+	return 0;
+}
+#endif
 
 #define MODULE_ALIAS_BLOCKDEV(major,minor) \
 	MODULE_ALIAS("block-major-" __stringify(major) "-" __stringify(minor))
