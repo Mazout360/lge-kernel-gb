@@ -337,7 +337,9 @@ static void class_pktcdvd_release(struct class *cls)
 {
 	kfree(cls);
 }
-static ssize_t class_pktcdvd_show_map(struct class *c, char *data)
+static ssize_t class_pktcdvd_show_map(struct class *c,
+                                      struct class_attribute *attr,
+                                      char *data)
 {
 	int n = 0;
 	int idx;
@@ -356,8 +358,10 @@ static ssize_t class_pktcdvd_show_map(struct class *c, char *data)
 	return n;
 }
 
-static ssize_t class_pktcdvd_store_add(struct class *c, const char *buf,
-					size_t count)
+static ssize_t class_pktcdvd_store_add(struct class *c,
+                                       struct class_attribute *attr,
+                                       const char *buf,
+                                       size_t count)
 {
 	unsigned int major, minor;
 
@@ -376,8 +380,10 @@ static ssize_t class_pktcdvd_store_add(struct class *c, const char *buf,
 	return -EINVAL;
 }
 
-static ssize_t class_pktcdvd_store_remove(struct class *c, const char *buf,
-					size_t count)
+static ssize_t class_pktcdvd_store_remove(struct class *c,
+                                          struct class_attribute *attr,
+                                          const char *buf,
+                                          size_t count)
 {
 	unsigned int major, minor;
 	if (sscanf(buf, "%u:%u", &major, &minor) == 2) {

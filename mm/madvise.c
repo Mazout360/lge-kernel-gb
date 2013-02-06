@@ -247,7 +247,7 @@ static int madvise_hwpoison(unsigned long start, unsigned long end)
 		printk(KERN_INFO "Injecting memory failure for page %lx at %lx\n",
 		       page_to_pfn(p), start);
 		/* Ignore return value for now */
-		__memory_failure(page_to_pfn(p), 0, 1);
+		__memory_failure(page_to_pfn(p), 0, MF_COUNT_INCREASED);
 		put_page(p);
 	}
 	return ret;
