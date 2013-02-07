@@ -399,6 +399,88 @@ static void sd_prot_op(struct scsi_cmnd *scmd, unsigned int dif)
 }
 
 /**
+ * scsi_setup_discard_cmnd - unmap blocks on thinly provisioned device
+ * @sdp: scsi device to operate one
+ * @rq: Request to prepare
+ *
+ * Will issue either UNMAP or WRITE SAME(16) depending on preference
+ * indicated by target device.
+ **/
+static int scsi_setup_discard_cmnd(struct scsi_device *sdp, struct request *rq)
+{
+	struct scsi_disk *sdkp = scsi_disk(rq->rq_disk);
+	struct bio *bio = rq->bio;
+	sector_t sector = bio->bi_sector;
+	unsigned int nr_sectors = bio_sectors(bio);
+	unsigned int len;
+	int ret;
+	struct page *page;
+    
+	if (sdkp->device->sector_size == 4096) {
+		sector >>= 3;
+		nr_sectors >>= 3;
+	}
+    
+	rq->timeout = SD_TIMEOUT;
+    
+	memset(rq->cmd, 0, rq->cmd_len);
+    
+	page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
+	if (!page)
+		return BLKPREP_DEFER;
+    
+	if (sdkp->unmap) {
+		char *buf = page_address(page);
+        
+		rq->cmd_len = 10;
+		rq->cmd[0] = UNMAP;
+		rq->cmd[8] = 24;
+        
+		put_unaligned_be16(6 + 16, &buf[0]);
+		put_unaligned_be16(16, &buf[2]);
+		put_unaligned_be64(sector, &buf[8]);
+		put_unaligned_be32(nr_sectors, &buf[16]);
+        
+		len = 24;
+	} else {
+		rq->cmd_len = 16;
+		rq->cmd[0] = WRITE_SAME_16;
+		rq->cmd[1] = 0x8; /* UNMAP */
+		put_unaligned_be64(sector, &rq->cmd[2]);
+		put_unaligned_be32(nr_sectors, &rq->cmd[10]);
+        
+		len = sdkp->device->sector_size;
+	}
+    
+	blk_add_request_payload(rq, page, len);
+	ret = scsi_setup_blk_pc_cmnd(sdp, rq);
+	rq->buffer = page_address(page);
+	if (ret != BLKPREP_OK) {
+		__free_page(page);
+		rq->buffer = NULL;
+	}
+	return ret;
+}
+
+static int scsi_setup_flush_cmnd(struct scsi_device *sdp, struct request *rq)
+{
+	rq->timeout = SD_TIMEOUT;
+	rq->retries = SD_MAX_RETRIES;
+	rq->cmd[0] = SYNCHRONIZE_CACHE;
+	rq->cmd_len = 10;
+    
+	return scsi_setup_blk_pc_cmnd(sdp, rq);
+}
+
+static void sd_unprep_fn(struct request_queue *q, struct request *rq)
+{
+	if (rq->cmd_flags & REQ_DISCARD) {
+		free_page((unsigned long)rq->buffer);
+		rq->buffer = NULL;
+	}
+}
+
+/**
  *	sd_init_command - build a scsi (read or write) command from
  *	information in the request structure.
  *	@SCpnt: pointer to mid-level's per scsi command structure that
@@ -418,7 +500,10 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 	int ret, host_dif;
 	unsigned char protect;
 
-	if (rq->cmd_type == REQ_TYPE_BLOCK_PC) {
+	if (rq->cmd_flags & REQ_DISCARD) {
+        ret = scsi_setup_discard_cmnd(sdp, rq);
+        goto out;
+    } else if (rq->cmd_type == REQ_TYPE_BLOCK_PC) {
 		ret = scsi_setup_blk_pc_cmnd(sdp, rq);
 		goto out;
 	} else if (rq->cmd_type != REQ_TYPE_FS) {
@@ -566,7 +651,7 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 		SCpnt->cmnd[0] = VARIABLE_LENGTH_CMD;
 		SCpnt->cmnd[7] = 0x18;
 		SCpnt->cmnd[9] = (rq_data_dir(rq) == READ) ? READ_32 : WRITE_32;
-		SCpnt->cmnd[10] = protect | (blk_fua_rq(rq) ? 0x8 : 0);
+		SCpnt->cmnd[10] = protect | ((rq->cmd_flags & REQ_FUA) ? 0x8 : 0);
 
 		/* LBA */
 		SCpnt->cmnd[12] = sizeof(block) > 4 ? (unsigned char) (block >> 56) & 0xff : 0;
@@ -591,7 +676,7 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 		SCpnt->cmnd[31] = (unsigned char) this_count & 0xff;
 	} else if (block > 0xffffffff) {
 		SCpnt->cmnd[0] += READ_16 - READ_6;
-		SCpnt->cmnd[1] = protect | (blk_fua_rq(rq) ? 0x8 : 0);
+		SCpnt->cmnd[1] = protect | ((rq->cmd_flags & REQ_FUA) ? 0x8 : 0);
 		SCpnt->cmnd[2] = sizeof(block) > 4 ? (unsigned char) (block >> 56) & 0xff : 0;
 		SCpnt->cmnd[3] = sizeof(block) > 4 ? (unsigned char) (block >> 48) & 0xff : 0;
 		SCpnt->cmnd[4] = sizeof(block) > 4 ? (unsigned char) (block >> 40) & 0xff : 0;
@@ -612,7 +697,7 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 			this_count = 0xffff;
 
 		SCpnt->cmnd[0] += READ_10 - READ_6;
-		SCpnt->cmnd[1] = protect | (blk_fua_rq(rq) ? 0x8 : 0);
+		SCpnt->cmnd[1] = protect | ((rq->cmd_flags & REQ_FUA) ? 0x8 : 0);
 		SCpnt->cmnd[2] = (unsigned char) (block >> 24) & 0xff;
 		SCpnt->cmnd[3] = (unsigned char) (block >> 16) & 0xff;
 		SCpnt->cmnd[4] = (unsigned char) (block >> 8) & 0xff;
@@ -621,7 +706,7 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 		SCpnt->cmnd[7] = (unsigned char) (this_count >> 8) & 0xff;
 		SCpnt->cmnd[8] = (unsigned char) this_count & 0xff;
 	} else {
-		if (unlikely(blk_fua_rq(rq))) {
+		if (unlikely(rq->cmd_flags & REQ_FUA)) {
 			/*
 			 * This happens only if this drive failed
 			 * 10byte rw command with ILLEGAL_REQUEST
@@ -817,10 +902,6 @@ static int sd_ioctl(struct block_device *bdev, fmode_t mode,
 	SCSI_LOG_IOCTL(1, printk("sd_ioctl: disk=%s, cmd=0x%x\n",
 						disk->disk_name, cmd));
 
-	error = scsi_verify_blk_ioctl(bdev, cmd);
-	if (error < 0)
-		return error;
-
 	/*
 	 * If we are in the middle of error recovery, don't let anyone
 	 * else try and use this device.  Also, if error recovery fails, it
@@ -842,7 +923,7 @@ static int sd_ioctl(struct block_device *bdev, fmode_t mode,
 		case SCSI_IOCTL_GET_BUS_NUMBER:
 			return scsi_ioctl(sdp, cmd, p);
 		default:
-			error = scsi_cmd_blk_ioctl(bdev, mode, cmd, p);
+			error = scsi_cmd_ioctl(disk->queue, disk, mode, cmd, p);
 			if (error != -ENOTTY)
 				return error;
 	}
@@ -1054,7 +1135,7 @@ static unsigned int sd_completed_bytes(struct scsi_cmnd *scmd)
 	unsigned int transferred = scsi_bufflen(scmd) - scsi_get_resid(scmd);
 	unsigned int good_bytes;
 
-	if (!blk_fs_request(scmd->request))
+	if (scmd->request->cmd_type != REQ_TYPE_FS)
 		return 0;
 
 	info_valid = scsi_get_sense_info_fld(scmd->sense_buffer,
@@ -1105,6 +1186,15 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 	struct scsi_disk *sdkp = scsi_disk(SCpnt->request->rq_disk);
 	int sense_valid = 0;
 	int sense_deferred = 0;
+    
+    /*
+ 	 * If this is a discard request that originated from the kernel
+ 	 * we need to free our payload here.  Note that we need to check
+ 	 * the request flag as the normal payload rules apply for
+ 	 * pass-through UNMAP / WRITE SAME requests.
+ 	 */
+    if (SCpnt->request->cmd_flags & REQ_DISCARD)
+        __free_page(bio_page(SCpnt->request->bio));
 
 	if (result) {
 		sense_valid = scsi_command_normalize_sense(SCpnt, &sshdr);
@@ -2084,6 +2174,7 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 	sd_revalidate_disk(gd);
 
 	blk_queue_prep_rq(sdp->request_queue, sd_prep_fn);
+    blk_queue_unprep_rq(sdp->request_queue, sd_unprep_fn);
 
 	gd->driverfs_dev = &sdp->sdev_gendev;
 	gd->flags = GENHD_FL_EXT_DEVT | GENHD_FL_DRIVERFS;

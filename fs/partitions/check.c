@@ -553,6 +553,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	struct parsed_partitions *state;
 	int p, highest, res;
 
+rescan:
 	if (bdev->bd_part_count)
 		return -EBUSY;
 	res = invalidate_partition(disk, 0);
@@ -589,7 +590,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 	/* add partitions */
 	for (p = 1; p < state->limit; p++) {
 		sector_t size, from;
-try_scan:
+
 		size = state->parts[p].size;
 		if (!size)
 			continue;
@@ -604,23 +605,19 @@ try_scan:
 
 		if (from + size > get_capacity(disk)) {
 			const struct block_device_operations *bdops = disk->fops;
-			unsigned long long capacity;
 
 			printk(KERN_WARNING
 			       "%s: p%d size %llu exceeds device capacity, ",
 			       disk->disk_name, p, (unsigned long long) size);
 
-			if (bdops->set_capacity &&
+			if (bdops->unlock_native_capacity &&
 			    (disk->flags & GENHD_FL_NATIVE_CAPACITY) == 0) {
 				printk(KERN_CONT "enabling native capacity\n");
-				capacity = bdops->set_capacity(disk, ~0ULL);
+				bdops->unlock_native_capacity(disk);
 				disk->flags |= GENHD_FL_NATIVE_CAPACITY;
-				if (capacity > get_capacity(disk)) {
-					set_capacity(disk, capacity);
-					check_disk_size_change(disk, bdev);
-					bdev->bd_invalidated = 0;
-				}
-				goto try_scan;
+				/* free state and restart */
+                kfree(state);
+                goto rescan;
 			} else {
 				/*
 				 * we can not ignore partitions of broken tables

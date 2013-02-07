@@ -94,6 +94,7 @@ struct scsi_cmnd;
 #define WRITE_LONG            0x3f
 #define CHANGE_DEFINITION     0x40
 #define WRITE_SAME            0x41
+#define UNMAP                 0x42
 #define READ_TOC              0x43
 #define LOG_SELECT            0x4c
 #define LOG_SENSE             0x4d
@@ -122,6 +123,8 @@ struct scsi_cmnd;
 #define READ_16               0x88
 #define WRITE_16              0x8a
 #define VERIFY_16	      0x8f
+#define SYNCHRONIZE_CACHE_16  0x91
+#define WRITE_SAME_16         0x93
 #define SERVICE_ACTION_IN     0x9e
 /* values for service action in */
 #define	SAI_READ_CAPACITY_16  0x10

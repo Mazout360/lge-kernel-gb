@@ -334,7 +334,7 @@ static void dispatch_io(int rw, unsigned int num_regions,
 	struct dpages old_pages = *dp;
 
 	if (sync)
-		rw |= (1 << BIO_RW_SYNCIO) | (1 << BIO_RW_UNPLUG);
+		rw |= REQ_SYNC | REQ_UNPLUG;
 
 	/*
 	 * For multiple regions we need to be careful to rewind
@@ -342,7 +342,7 @@ static void dispatch_io(int rw, unsigned int num_regions,
 	 */
 	for (i = 0; i < num_regions; i++) {
 		*dp = old_pages;
-		if (where[i].count)
+		if (where[i].count || (rw & REQ_HARDBARRIER))
 			do_region(rw, i, where + i, dp, io);
 	}
 
@@ -382,11 +382,6 @@ retry:
 		io_schedule();
 	}
 	set_current_state(TASK_RUNNING);
-
-	if (io.eopnotsupp_bits && (rw & (1 << BIO_RW_BARRIER))) {
-		rw &= ~(1 << BIO_RW_BARRIER);
-		goto retry;
-	}
 
 	if (error_bits)
 		*error_bits = io.error_bits;
