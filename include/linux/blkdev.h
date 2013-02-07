@@ -185,11 +185,12 @@ struct request {
 	};
 
 	/*
-	 * two pointers are available for the IO schedulers, if they need
+	 * three pointers are available for the IO schedulers, if they need
 	 * more they have to dynamically allocate it.
 	 */
 	void *elevator_private;
 	void *elevator_private2;
+    void *elevator_private3;
 
 	struct gendisk *rq_disk;
 	unsigned long start_time;
@@ -325,7 +326,7 @@ struct queue_limits {
 
 	unsigned char		misaligned;
     unsigned char    discard_misaligned;
-	unsigned char		cluster;
+	unsigned char		no_cluster;
     signed char    discard_zeroes_data;
 };
 
@@ -451,6 +452,7 @@ struct request_queue
 #endif
 };
 
+#define QUEUE_FLAG_CLUSTER	0	/* cluster several segments into 1 */
 #define QUEUE_FLAG_QUEUED	1	/* uses generic tag queueing */
 #define QUEUE_FLAG_STOPPED	2	/* queue is stopped */
 #define	QUEUE_FLAG_SYNCFULL	3	/* read queue has been filled */
@@ -467,13 +469,13 @@ struct request_queue
 #define QUEUE_FLAG_NONROT      14	/* non-rotational device (SSD) */
 #define QUEUE_FLAG_VIRT        QUEUE_FLAG_NONROT /* paravirt device */
 #define QUEUE_FLAG_IO_STAT     15	/* do IO stats */
-#define QUEUE_FLAG_CQ	       16	/* hardware does queuing */
-#define QUEUE_FLAG_DISCARD     17	/* supports DISCARD */
+#define QUEUE_FLAG_DISCARD     16  /* supports DISCARD */
 #define QUEUE_FLAG_NOXMERGES   18  /* No extended merges */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
-				 (1 << QUEUE_FLAG_STACKABLE)	|	\
-				 (1 << QUEUE_FLAG_SAME_COMP))
+(1 << QUEUE_FLAG_CLUSTER) |		\
+(1 << QUEUE_FLAG_STACKABLE)	|	\
+(1 << QUEUE_FLAG_SAME_COMP))
 
 static inline int queue_is_locked(struct request_queue *q)
 {
@@ -592,7 +594,6 @@ enum {
 
 #define blk_queue_plugged(q)	test_bit(QUEUE_FLAG_PLUGGED, &(q)->queue_flags)
 #define blk_queue_tagged(q)	test_bit(QUEUE_FLAG_QUEUED, &(q)->queue_flags)
-#define blk_queue_queuing(q)	test_bit(QUEUE_FLAG_CQ, &(q)->queue_flags)
 #define blk_queue_stopped(q)	test_bit(QUEUE_FLAG_STOPPED, &(q)->queue_flags)
 #define blk_queue_nomerges(q)	test_bit(QUEUE_FLAG_NOMERGES, &(q)->queue_flags)
 #define blk_queue_noxmerges(q)  \
@@ -638,11 +639,6 @@ enum {
 #define list_entry_rq(ptr)	list_entry((ptr), struct request, queuelist)
 
 #define rq_data_dir(rq)		((rq)->cmd_flags & 1)
-
-static inline unsigned int blk_queue_cluster(struct request_queue *q)
-{
-	return q->limits.cluster;
-}
 
 /*
  * We regard a request as sync, if either a read or a sync write
@@ -961,8 +957,12 @@ extern void blk_urgent_request(struct request_queue *q, request_fn_proc *fn);
 extern void blk_cleanup_queue(struct request_queue *);
 extern void blk_queue_make_request(struct request_queue *, make_request_fn *);
 extern void blk_queue_bounce_limit(struct request_queue *, u64);
-extern void blk_queue_max_sectors(struct request_queue *, unsigned int);
 extern void blk_queue_max_hw_sectors(struct request_queue *, unsigned int);
+/* Temporary compatibility wrapper */
+static inline void blk_queue_max_sectors(struct request_queue *q, unsigned int max)
+{
+    blk_queue_max_hw_sectors(q, max);
+}
 extern void blk_queue_max_segments(struct request_queue *, unsigned short);
 
 static inline void blk_queue_max_phys_segments(struct request_queue *q, unsigned short max)
@@ -978,7 +978,7 @@ extern void blk_queue_max_segment_size(struct request_queue *, unsigned int);
 extern void blk_queue_max_discard_sectors(struct request_queue *q,
 		unsigned int max_discard_sectors);
 extern void blk_queue_logical_block_size(struct request_queue *, unsigned short);
-extern void blk_queue_physical_block_size(struct request_queue *, unsigned int);
+extern void blk_queue_physical_block_size(struct request_queue *, unsigned short);
 extern void blk_queue_alignment_offset(struct request_queue *q,
 				       unsigned int alignment);
 extern void blk_limits_io_min(struct queue_limits *limits, unsigned int min);
@@ -1066,11 +1066,16 @@ extern int blk_verify_command(unsigned char *cmd, fmode_t has_write_perm);
 #define MAX_PHYS_SEGMENTS 128
 #define MAX_HW_SEGMENTS 128
 #define SAFE_MAX_SECTORS 255
-#define BLK_DEF_MAX_SECTORS 1024
 
 #define MAX_SEGMENT_SIZE	65536
 
-#define BLK_SEG_BOUNDARY_MASK	0xFFFFFFFFUL
+enum blk_default_limits {
+	BLK_MAX_SEGMENTS	= 128,
+	BLK_SAFE_MAX_SECTORS	= 255,
+	BLK_DEF_MAX_SECTORS	= 1024,
+	BLK_MAX_SEGMENT_SIZE	= 65536,
+	BLK_SEG_BOUNDARY_MASK	= 0xFFFFFFFFUL,
+};
 
 #define blkdev_entry_to_request(entry) list_entry((entry), struct request, queuelist)
 
@@ -1163,8 +1168,7 @@ static inline int queue_limit_alignment_offset(struct queue_limits *lim, sector_
     unsigned int alignment = (sector << 9) & (granularity - 1);
 
 	return (granularity + lim->alignment_offset - alignment)
-    1121
-    +    & (granularity - 1);
+    & (granularity - 1);
 }
 
 static inline int bdev_alignment_offset(struct block_device *bdev)

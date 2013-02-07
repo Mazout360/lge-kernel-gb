@@ -93,7 +93,7 @@ void blk_set_default_limits(struct queue_limits *lim)
 {
 	lim->max_segments = BLK_MAX_SEGMENTS;
 	lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
-	lim->max_segment_size = MAX_SEGMENT_SIZE;
+	lim->max_segment_size = BLK_MAX_SEGMENT_SIZE;
 	lim->max_sectors = BLK_DEF_MAX_SECTORS;
 	lim->max_hw_sectors = INT_MAX;
 	lim->max_discard_sectors = 0;
@@ -153,7 +153,7 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	q->unplug_timer.data = (unsigned long)q;
     
 	blk_set_default_limits(&q->limits);
-	blk_queue_max_sectors(q, SAFE_MAX_SECTORS);
+	blk_queue_max_hw_sectors(q, BLK_SAFE_MAX_SECTORS);
     
 	/*
 	 * If the caller didn't supply a lock, fall back to our embedded
@@ -209,7 +209,7 @@ void blk_queue_bounce_limit(struct request_queue *q, u64 dma_mask)
 EXPORT_SYMBOL(blk_queue_bounce_limit);
 
 /**
- * blk_queue_max_sectors - set max sectors for a request for this queue
+ * blk_queue_max_hw_sectors - set max sectors for a request for this queue
  * @q:  the request queue for the device
  * @max_sectors:  max sectors in the usual 512b unit
  *
@@ -217,7 +217,7 @@ EXPORT_SYMBOL(blk_queue_bounce_limit);
  *    Enables a low level driver to set an upper limit on the size of
  *    received requests.
  **/
-void blk_queue_max_sectors(struct request_queue *q, unsigned int max_sectors)
+void blk_queue_max_hw_sectors(struct request_queue *q, unsigned int max_sectors)
 {
 	if ((max_sectors << 9) < PAGE_CACHE_SIZE) {
 		max_sectors = 1 << (PAGE_CACHE_SHIFT - 9);
@@ -231,15 +231,6 @@ void blk_queue_max_sectors(struct request_queue *q, unsigned int max_sectors)
 		q->limits.max_sectors = BLK_DEF_MAX_SECTORS;
 		q->limits.max_hw_sectors = max_sectors;
 	}
-}
-EXPORT_SYMBOL(blk_queue_max_sectors);
-
-void blk_queue_max_hw_sectors(struct request_queue *q, unsigned int max_sectors)
-{
-	if (BLK_DEF_MAX_SECTORS > max_sectors)
-		q->limits.max_hw_sectors = BLK_DEF_MAX_SECTORS;
-	else
-		q->limits.max_hw_sectors = max_sectors;
 }
 EXPORT_SYMBOL(blk_queue_max_hw_sectors);
 

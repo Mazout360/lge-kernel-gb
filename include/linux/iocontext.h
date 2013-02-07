@@ -50,7 +50,7 @@ struct io_context {
 	spinlock_t lock;
 
 	unsigned short ioprio;
-	DECLARE_BITMAP(ioprio_changed, IOC_IOPRIO_CHANGED_BITS);
+	unsigned short ioprio_changed;
 
 #if defined(CONFIG_BLK_CGROUP) || defined(CONFIG_BLK_CGROUP_MODULE)
 	unsigned short cgroup_changed;

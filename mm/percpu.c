@@ -393,6 +393,7 @@ static int pcpu_need_to_extend(struct pcpu_chunk *chunk)
  * 0 on success, -errno on failure.
  */
 static int pcpu_extend_area_map(struct pcpu_chunk *chunk, int new_alloc)
+__releases(lock) __acquires(lock)
 {
 	int *old = NULL, *new = NULL;
 	size_t old_size = 0, new_size = new_alloc * sizeof(new[0]);
@@ -1298,20 +1299,6 @@ void free_percpu(void *ptr)
 	spin_unlock_irqrestore(&pcpu_lock, flags);
 }
 EXPORT_SYMBOL_GPL(free_percpu);
-
-static inline size_t pcpu_calc_fc_sizes(size_t static_size,
-					size_t reserved_size,
-					ssize_t *dyn_sizep)
-{
-	size_t size_sum;
-
-	size_sum = PFN_ALIGN(static_size + reserved_size +
-			     (*dyn_sizep >= 0 ? *dyn_sizep : 0));
-	if (*dyn_sizep != 0)
-		*dyn_sizep = size_sum - static_size - reserved_size;
-
-	return size_sum;
-}
 
 /**
  * per_cpu_ptr_to_phys - convert translated percpu address to physical address

@@ -18,8 +18,8 @@
 
 #ifndef PERCPU_ENOUGH_ROOM
 #define PERCPU_ENOUGH_ROOM						\
-	(ALIGN(__per_cpu_end - __per_cpu_start, SMP_CACHE_BYTES) +	\
-	 PERCPU_MODULE_RESERVE)
+(ALIGN(__per_cpu_end - __per_cpu_start, SMP_CACHE_BYTES) +	\
+PERCPU_MODULE_RESERVE)
 #endif
 
 /*
@@ -27,14 +27,19 @@
  * we force a syntax error here if it isn't.
  */
 #define get_cpu_var(var) (*({				\
-	extern int simple_identifier_##var(void);	\
-	preempt_disable();				\
-	&__get_cpu_var(var); }))
-#define put_cpu_var(var) preempt_enable()
+preempt_disable();				\
+&__get_cpu_var(var); }))
+
+/*
+ * The weird & is necessary because sparse considers (void)(var) to be
+ * a direct dereference of percpu variable (var).
+ */
+#define put_cpu_var(var) do {				\
+(void)&(var);					\
+preempt_enable();				\
+} while (0)
 
 #ifdef CONFIG_SMP
-
-#ifndef CONFIG_HAVE_LEGACY_PER_CPU_AREA
 
 /* minimum unit size, also is the maximum supported allocation size */
 #define PCPU_MIN_UNIT_SIZE		PFN_ALIGN(64 << 10)
@@ -63,7 +68,7 @@ struct pcpu_group_info {
 	int			nr_units;	/* aligned # of units */
 	unsigned long		base_offset;	/* base address offset */
 	unsigned int		*cpu_map;	/* unit->cpu map, empty
-						 * entries contain NR_CPUS */
+                                     * entries contain NR_CPUS */
 };
 
 struct pcpu_alloc_info {
@@ -82,7 +87,7 @@ enum pcpu_fc {
 	PCPU_FC_AUTO,
 	PCPU_FC_EMBED,
 	PCPU_FC_PAGE,
-
+    
 	PCPU_FC_NR,
 };
 extern const char *pcpu_fc_names[PCPU_FC_NR];
@@ -90,36 +95,36 @@ extern const char *pcpu_fc_names[PCPU_FC_NR];
 extern enum pcpu_fc pcpu_chosen_fc;
 
 typedef void * (*pcpu_fc_alloc_fn_t)(unsigned int cpu, size_t size,
-				     size_t align);
+size_t align);
 typedef void (*pcpu_fc_free_fn_t)(void *ptr, size_t size);
 typedef void (*pcpu_fc_populate_pte_fn_t)(unsigned long addr);
 typedef int (pcpu_fc_cpu_distance_fn_t)(unsigned int from, unsigned int to);
 
 extern struct pcpu_alloc_info * __init pcpu_alloc_alloc_info(int nr_groups,
-							     int nr_units);
+                                                             int nr_units);
 extern void __init pcpu_free_alloc_info(struct pcpu_alloc_info *ai);
 
 extern struct pcpu_alloc_info * __init pcpu_build_alloc_info(
-				size_t reserved_size, ssize_t dyn_size,
-				size_t atom_size,
-				pcpu_fc_cpu_distance_fn_t cpu_distance_fn);
+                                                             size_t reserved_size, ssize_t dyn_size,
+                                                             size_t atom_size,
+                                                             pcpu_fc_cpu_distance_fn_t cpu_distance_fn);
 
 extern int __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
-					 void *base_addr);
+                                         void *base_addr);
 
 #ifdef CONFIG_NEED_PER_CPU_EMBED_FIRST_CHUNK
 extern int __init pcpu_embed_first_chunk(size_t reserved_size, ssize_t dyn_size,
-				size_t atom_size,
-				pcpu_fc_cpu_distance_fn_t cpu_distance_fn,
-				pcpu_fc_alloc_fn_t alloc_fn,
-				pcpu_fc_free_fn_t free_fn);
+                                         size_t atom_size,
+                                         pcpu_fc_cpu_distance_fn_t cpu_distance_fn,
+                                         pcpu_fc_alloc_fn_t alloc_fn,
+                                         pcpu_fc_free_fn_t free_fn);
 #endif
 
 #ifdef CONFIG_NEED_PER_CPU_PAGE_FIRST_CHUNK
 extern int __init pcpu_page_first_chunk(size_t reserved_size,
-				pcpu_fc_alloc_fn_t alloc_fn,
-				pcpu_fc_free_fn_t free_fn,
-				pcpu_fc_populate_pte_fn_t populate_pte_fn);
+                                        pcpu_fc_alloc_fn_t alloc_fn,
+                                        pcpu_fc_free_fn_t free_fn,
+                                        pcpu_fc_populate_pte_fn_t populate_pte_fn);
 #endif
 
 /*
@@ -129,31 +134,9 @@ extern int __init pcpu_page_first_chunk(size_t reserved_size,
  */
 #define per_cpu_ptr(ptr, cpu)	SHIFT_PERCPU_PTR((ptr), per_cpu_offset((cpu)))
 
-extern void *__alloc_reserved_percpu(size_t size, size_t align);
-
-#else /* CONFIG_HAVE_LEGACY_PER_CPU_AREA */
-
-struct percpu_data {
-	void *ptrs[1];
-};
-
-/* pointer disguising messes up the kmemleak objects tracking */
-#ifndef CONFIG_DEBUG_KMEMLEAK
-#define __percpu_disguise(pdata) (struct percpu_data *)~(unsigned long)(pdata)
-#else
-#define __percpu_disguise(pdata) (struct percpu_data *)(pdata)
-#endif
-
-#define per_cpu_ptr(ptr, cpu)						\
-({									\
-        struct percpu_data *__p = __percpu_disguise(ptr);		\
-        (__typeof__(ptr))__p->ptrs[(cpu)];				\
-})
-
-#endif /* CONFIG_HAVE_LEGACY_PER_CPU_AREA */
-
-extern void *__alloc_percpu(size_t size, size_t align);
-extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
+extern void __percpu *__alloc_reserved_percpu(size_t size, size_t align);
+extern void __percpu *__alloc_percpu(size_t size, size_t align);
+extern void free_percpu(void __percpu *__pdata);
 
 #ifndef CONFIG_HAVE_SETUP_PER_CPU_AREA
 extern void __init setup_per_cpu_areas(void);
@@ -163,7 +146,7 @@ extern void __init setup_per_cpu_areas(void);
 
 #define per_cpu_ptr(ptr, cpu) ({ (void)(cpu); (ptr); })
 
-static inline void *__alloc_percpu(size_t size, size_t align)
+static inline void __percpu *__alloc_percpu(size_t size, size_t align)
 {
 	/*
 	 * Can't easily make larger alignment work with kmalloc.  WARN
@@ -174,7 +157,7 @@ static inline void *__alloc_percpu(size_t size, size_t align)
 	return kzalloc(size, GFP_KERNEL);
 }
 
-static inline void free_percpu(void *p)
+static inline void free_percpu(void __percpu *p)
 {
 	kfree(p);
 }
@@ -188,8 +171,8 @@ static inline void *pcpu_lpage_remapped(void *kaddr)
 
 #endif /* CONFIG_SMP */
 
-#define alloc_percpu(type)	(type *)__alloc_percpu(sizeof(type), \
-						       __alignof__(type))
+#define alloc_percpu(type)	\
+(typeof(type) __percpu *)__alloc_percpu(sizeof(type), __alignof__(type))
 
 /*
  * Optional methods for optimized non-lvalue per-cpu variable access.
@@ -205,18 +188,20 @@ static inline void *pcpu_lpage_remapped(void *kaddr)
  */
 #ifndef percpu_read
 # define percpu_read(var)						\
-  ({									\
-	typeof(per_cpu_var(var)) __tmp_var__;				\
-	__tmp_var__ = get_cpu_var(var);					\
-	put_cpu_var(var);						\
-	__tmp_var__;							\
-  })
+({									\
+typeof(var) *pr_ptr__ = &(var);					\
+typeof(var) pr_ret__;						\
+pr_ret__ = get_cpu_var(*pr_ptr__);				\
+put_cpu_var(*pr_ptr__);						\
+pr_ret__;							\
+})
 #endif
 
 #define __percpu_generic_to_op(var, val, op)				\
 do {									\
-	get_cpu_var(var) op val;					\
-	put_cpu_var(var);						\
+typeof(var) *pgto_ptr__ = &(var);				\
+get_cpu_var(*pgto_ptr__) op val;				\
+put_cpu_var(*pgto_ptr__);					\
 } while (0)
 
 #ifndef percpu_write
@@ -250,21 +235,23 @@ do {									\
 
 extern void __bad_size_call_parameter(void);
 
-#define __size_call_return(stem, variable)				\
-({	typeof(variable) ret__;						\
+#define __pcpu_size_call_return(stem, variable)				\
+({	typeof(variable) pscr_ret__;					\
+__verify_pcpu_ptr(&(variable));					\
 switch(sizeof(variable)) {					\
-case 1: ret__ = stem##1(variable);break;			\
-case 2: ret__ = stem##2(variable);break;			\
-case 4: ret__ = stem##4(variable);break;			\
-case 8: ret__ = stem##8(variable);break;			\
+case 1: pscr_ret__ = stem##1(variable);break;			\
+case 2: pscr_ret__ = stem##2(variable);break;			\
+case 4: pscr_ret__ = stem##4(variable);break;			\
+case 8: pscr_ret__ = stem##8(variable);break;			\
 default:							\
 __bad_size_call_parameter();break;			\
 }								\
-ret__;								\
+pscr_ret__;							\
 })
 
-#define __size_call(stem, variable, ...)				\
+#define __pcpu_size_call(stem, variable, ...)				\
 do {									\
+__verify_pcpu_ptr(&(variable));					\
 switch(sizeof(variable)) {					\
 case 1: stem##1(variable, __VA_ARGS__);break;		\
 case 2: stem##2(variable, __VA_ARGS__);break;		\
@@ -277,8 +264,7 @@ __bad_size_call_parameter();break;		\
 
 /*
  * Optimized manipulation for memory allocated through the per cpu
- * allocator or for addresses of per cpu variables (can be determined
- * using per_cpu_var(xx).
+ * allocator or for addresses of per cpu variables.
  *
  * These operation guarantee exclusivity of access for other operations
  * on the *same* processor. The assumption is that per cpu data is only
@@ -323,13 +309,13 @@ ret__;								\
 # ifndef this_cpu_read_8
 #  define this_cpu_read_8(pcp)	_this_cpu_generic_read(pcp)
 # endif
-# define this_cpu_read(pcp)	__size_call_return(this_cpu_read_, (pcp))
+# define this_cpu_read(pcp)	__pcpu_size_call_return(this_cpu_read_, (pcp))
 #endif
 
 #define _this_cpu_generic_to_op(pcp, val, op)				\
 do {									\
 preempt_disable();						\
-*__this_cpu_ptr(&pcp) op val;					\
+*__this_cpu_ptr(&(pcp)) op val;					\
 preempt_enable();						\
 } while (0)
 
@@ -346,7 +332,7 @@ preempt_enable();						\
 # ifndef this_cpu_write_8
 #  define this_cpu_write_8(pcp, val)	_this_cpu_generic_to_op((pcp), (val), =)
 # endif
-# define this_cpu_write(pcp, val)	__size_call(this_cpu_write_, (pcp), (val))
+# define this_cpu_write(pcp, val)	__pcpu_size_call(this_cpu_write_, (pcp), (val))
 #endif
 
 #ifndef this_cpu_add
@@ -362,7 +348,7 @@ preempt_enable();						\
 # ifndef this_cpu_add_8
 #  define this_cpu_add_8(pcp, val)	_this_cpu_generic_to_op((pcp), (val), +=)
 # endif
-# define this_cpu_add(pcp, val)		__size_call(this_cpu_add_, (pcp), (val))
+# define this_cpu_add(pcp, val)		__pcpu_size_call(this_cpu_add_, (pcp), (val))
 #endif
 
 #ifndef this_cpu_sub
@@ -390,7 +376,7 @@ preempt_enable();						\
 # ifndef this_cpu_and_8
 #  define this_cpu_and_8(pcp, val)	_this_cpu_generic_to_op((pcp), (val), &=)
 # endif
-# define this_cpu_and(pcp, val)		__size_call(this_cpu_and_, (pcp), (val))
+# define this_cpu_and(pcp, val)		__pcpu_size_call(this_cpu_and_, (pcp), (val))
 #endif
 
 #ifndef this_cpu_or
@@ -406,7 +392,7 @@ preempt_enable();						\
 # ifndef this_cpu_or_8
 #  define this_cpu_or_8(pcp, val)	_this_cpu_generic_to_op((pcp), (val), |=)
 # endif
-# define this_cpu_or(pcp, val)		__size_call(this_cpu_or_, (pcp), (val))
+# define this_cpu_or(pcp, val)		__pcpu_size_call(this_cpu_or_, (pcp), (val))
 #endif
 
 #ifndef this_cpu_xor
@@ -422,7 +408,7 @@ preempt_enable();						\
 # ifndef this_cpu_xor_8
 #  define this_cpu_xor_8(pcp, val)	_this_cpu_generic_to_op((pcp), (val), ^=)
 # endif
-# define this_cpu_xor(pcp, val)		__size_call(this_cpu_or_, (pcp), (val))
+# define this_cpu_xor(pcp, val)		__pcpu_size_call(this_cpu_or_, (pcp), (val))
 #endif
 
 /*
@@ -452,7 +438,7 @@ preempt_enable();						\
 # ifndef __this_cpu_read_8
 #  define __this_cpu_read_8(pcp)	(*__this_cpu_ptr(&(pcp)))
 # endif
-# define __this_cpu_read(pcp)	__size_call_return(__this_cpu_read_, (pcp))
+# define __this_cpu_read(pcp)	__pcpu_size_call_return(__this_cpu_read_, (pcp))
 #endif
 
 #define __this_cpu_generic_to_op(pcp, val, op)				\
@@ -473,7 +459,7 @@ do {									\
 # ifndef __this_cpu_write_8
 #  define __this_cpu_write_8(pcp, val)	__this_cpu_generic_to_op((pcp), (val), =)
 # endif
-# define __this_cpu_write(pcp, val)	__size_call(__this_cpu_write_, (pcp), (val))
+# define __this_cpu_write(pcp, val)	__pcpu_size_call(__this_cpu_write_, (pcp), (val))
 #endif
 
 #ifndef __this_cpu_add
@@ -489,7 +475,7 @@ do {									\
 # ifndef __this_cpu_add_8
 #  define __this_cpu_add_8(pcp, val)	__this_cpu_generic_to_op((pcp), (val), +=)
 # endif
-# define __this_cpu_add(pcp, val)	__size_call(__this_cpu_add_, (pcp), (val))
+# define __this_cpu_add(pcp, val)	__pcpu_size_call(__this_cpu_add_, (pcp), (val))
 #endif
 
 #ifndef __this_cpu_sub
@@ -517,7 +503,7 @@ do {									\
 # ifndef __this_cpu_and_8
 #  define __this_cpu_and_8(pcp, val)	__this_cpu_generic_to_op((pcp), (val), &=)
 # endif
-# define __this_cpu_and(pcp, val)	__size_call(__this_cpu_and_, (pcp), (val))
+# define __this_cpu_and(pcp, val)	__pcpu_size_call(__this_cpu_and_, (pcp), (val))
 #endif
 
 #ifndef __this_cpu_or
@@ -533,7 +519,7 @@ do {									\
 # ifndef __this_cpu_or_8
 #  define __this_cpu_or_8(pcp, val)	__this_cpu_generic_to_op((pcp), (val), |=)
 # endif
-# define __this_cpu_or(pcp, val)	__size_call(__this_cpu_or_, (pcp), (val))
+# define __this_cpu_or(pcp, val)	__pcpu_size_call(__this_cpu_or_, (pcp), (val))
 #endif
 
 #ifndef __this_cpu_xor
@@ -549,7 +535,7 @@ do {									\
 # ifndef __this_cpu_xor_8
 #  define __this_cpu_xor_8(pcp, val)	__this_cpu_generic_to_op((pcp), (val), ^=)
 # endif
-# define __this_cpu_xor(pcp, val)	__size_call(__this_cpu_xor_, (pcp), (val))
+# define __this_cpu_xor(pcp, val)	__pcpu_size_call(__this_cpu_xor_, (pcp), (val))
 #endif
 
 /*
@@ -580,7 +566,7 @@ local_irq_restore(flags);					\
 # ifndef irqsafe_cpu_add_8
 #  define irqsafe_cpu_add_8(pcp, val) irqsafe_cpu_generic_to_op((pcp), (val), +=)
 # endif
-# define irqsafe_cpu_add(pcp, val) __size_call(irqsafe_cpu_add_, (pcp), (val))
+# define irqsafe_cpu_add(pcp, val) __pcpu_size_call(irqsafe_cpu_add_, (pcp), (val))
 #endif
 
 #ifndef irqsafe_cpu_sub
@@ -608,7 +594,7 @@ local_irq_restore(flags);					\
 # ifndef irqsafe_cpu_and_8
 #  define irqsafe_cpu_and_8(pcp, val) irqsafe_cpu_generic_to_op((pcp), (val), &=)
 # endif
-# define irqsafe_cpu_and(pcp, val) __size_call(irqsafe_cpu_and_, (val))
+# define irqsafe_cpu_and(pcp, val) __pcpu_size_call(irqsafe_cpu_and_, (val))
 #endif
 
 #ifndef irqsafe_cpu_or
@@ -624,7 +610,7 @@ local_irq_restore(flags);					\
 # ifndef irqsafe_cpu_or_8
 #  define irqsafe_cpu_or_8(pcp, val) irqsafe_cpu_generic_to_op((pcp), (val), |=)
 # endif
-# define irqsafe_cpu_or(pcp, val) __size_call(irqsafe_cpu_or_, (val))
+# define irqsafe_cpu_or(pcp, val) __pcpu_size_call(irqsafe_cpu_or_, (val))
 #endif
 
 #ifndef irqsafe_cpu_xor
@@ -640,7 +626,7 @@ local_irq_restore(flags);					\
 # ifndef irqsafe_cpu_xor_8
 #  define irqsafe_cpu_xor_8(pcp, val) irqsafe_cpu_generic_to_op((pcp), (val), ^=)
 # endif
-# define irqsafe_cpu_xor(pcp, val) __size_call(irqsafe_cpu_xor_, (val))
+# define irqsafe_cpu_xor(pcp, val) __pcpu_size_call(irqsafe_cpu_xor_, (val))
 #endif
 
 #endif /* __LINUX_PERCPU_H */

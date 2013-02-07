@@ -16,7 +16,9 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/blkdev.h>
+#include <linux/slab.h>
 #include "blk-cgroup.h"
+#include <linux/genhd.h>
 
 #define MAX_KEY_LEN 100
 
@@ -51,18 +53,38 @@ struct cgroup_subsys blkio_subsys = {
 };
 EXPORT_SYMBOL_GPL(blkio_subsys);
 
+static inline void blkio_policy_insert_node(struct blkio_cgroup *blkcg,
+                                            struct blkio_policy_node *pn)
+{
+	list_add(&pn->node, &blkcg->policy_list);
+}
+
+/* Must be called with blkcg->lock held */
+static inline void blkio_policy_delete_node(struct blkio_policy_node *pn)
+{
+	list_del(&pn->node);
+}
+
+/* Must be called with blkcg->lock held */
+static struct blkio_policy_node *
+blkio_policy_search_node(const struct blkio_cgroup *blkcg, dev_t dev)
+{
+	struct blkio_policy_node *pn;
+    
+	list_for_each_entry(pn, &blkcg->policy_list, node) {
+		if (pn->dev == dev)
+			return pn;
+	}
+    
+	return NULL;
+}
+
 struct blkio_cgroup *cgroup_to_blkio_cgroup(struct cgroup *cgroup)
 {
 	return container_of(cgroup_subsys_state(cgroup, blkio_subsys_id),
                         struct blkio_cgroup, css);
 }
 EXPORT_SYMBOL_GPL(cgroup_to_blkio_cgroup);
-
-void blkio_group_init(struct blkio_group *blkg)
-{
-	spin_lock_init(&blkg->stats_lock);
-}
-EXPORT_SYMBOL_GPL(blkio_group_init);
 
 /*
  * Add to the appropriate stat variable depending on the request type.
@@ -80,6 +102,185 @@ static void blkio_add_stat(uint64_t *stat, uint64_t add, bool direction,
 	else
 		stat[BLKIO_STAT_ASYNC] += add;
 }
+
+/*
+ * Decrements the appropriate stat variable if non-zero depending on the
+ * request type. Panics on value being zero.
+ * This should be called with the blkg->stats_lock held.
+ */
+static void blkio_check_and_dec_stat(uint64_t *stat, bool direction, bool sync)
+{
+	if (direction) {
+		BUG_ON(stat[BLKIO_STAT_WRITE] == 0);
+		stat[BLKIO_STAT_WRITE]--;
+	} else {
+		BUG_ON(stat[BLKIO_STAT_READ] == 0);
+		stat[BLKIO_STAT_READ]--;
+	}
+	if (sync) {
+		BUG_ON(stat[BLKIO_STAT_SYNC] == 0);
+		stat[BLKIO_STAT_SYNC]--;
+	} else {
+		BUG_ON(stat[BLKIO_STAT_ASYNC] == 0);
+		stat[BLKIO_STAT_ASYNC]--;
+	}
+}
+
+#ifdef CONFIG_DEBUG_BLK_CGROUP
+/* This should be called with the blkg->stats_lock held. */
+static void blkio_set_start_group_wait_time(struct blkio_group *blkg,
+                                            struct blkio_group *curr_blkg)
+{
+	if (blkio_blkg_waiting(&blkg->stats))
+		return;
+	if (blkg == curr_blkg)
+		return;
+	blkg->stats.start_group_wait_time = sched_clock();
+	blkio_mark_blkg_waiting(&blkg->stats);
+}
+
+/* This should be called with the blkg->stats_lock held. */
+static void blkio_update_group_wait_time(struct blkio_group_stats *stats)
+{
+	unsigned long long now;
+    
+	if (!blkio_blkg_waiting(stats))
+		return;
+    
+	now = sched_clock();
+	if (time_after64(now, stats->start_group_wait_time))
+		stats->group_wait_time += now - stats->start_group_wait_time;
+	blkio_clear_blkg_waiting(stats);
+}
+
+/* This should be called with the blkg->stats_lock held. */
+static void blkio_end_empty_time(struct blkio_group_stats *stats)
+{
+	unsigned long long now;
+    
+	if (!blkio_blkg_empty(stats))
+		return;
+    
+	now = sched_clock();
+	if (time_after64(now, stats->start_empty_time))
+		stats->empty_time += now - stats->start_empty_time;
+	blkio_clear_blkg_empty(stats);
+}
+
+void blkiocg_update_set_idle_time_stats(struct blkio_group *blkg)
+{
+	unsigned long flags;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	BUG_ON(blkio_blkg_idling(&blkg->stats));
+	blkg->stats.start_idle_time = sched_clock();
+	blkio_mark_blkg_idling(&blkg->stats);
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_set_idle_time_stats);
+
+void blkiocg_update_idle_time_stats(struct blkio_group *blkg)
+{
+	unsigned long flags;
+	unsigned long long now;
+	struct blkio_group_stats *stats;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	stats = &blkg->stats;
+	if (blkio_blkg_idling(stats)) {
+		now = sched_clock();
+		if (time_after64(now, stats->start_idle_time))
+			stats->idle_time += now - stats->start_idle_time;
+		blkio_clear_blkg_idling(stats);
+	}
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_idle_time_stats);
+
+void blkiocg_update_avg_queue_size_stats(struct blkio_group *blkg)
+{
+	unsigned long flags;
+	struct blkio_group_stats *stats;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	stats = &blkg->stats;
+	stats->avg_queue_size_sum +=
+    stats->stat_arr[BLKIO_STAT_QUEUED][BLKIO_STAT_READ] +
+    stats->stat_arr[BLKIO_STAT_QUEUED][BLKIO_STAT_WRITE];
+	stats->avg_queue_size_samples++;
+	blkio_update_group_wait_time(stats);
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_avg_queue_size_stats);
+
+void blkiocg_set_start_empty_time(struct blkio_group *blkg)
+{
+	unsigned long flags;
+	struct blkio_group_stats *stats;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	stats = &blkg->stats;
+    
+	if (stats->stat_arr[BLKIO_STAT_QUEUED][BLKIO_STAT_READ] ||
+        stats->stat_arr[BLKIO_STAT_QUEUED][BLKIO_STAT_WRITE]) {
+		spin_unlock_irqrestore(&blkg->stats_lock, flags);
+		return;
+	}
+    
+	/*
+	 * group is already marked empty. This can happen if cfqq got new
+	 * request in parent group and moved to this group while being added
+	 * to service tree. Just ignore the event and move on.
+	 */
+	if(blkio_blkg_empty(stats)) {
+		spin_unlock_irqrestore(&blkg->stats_lock, flags);
+		return;
+	}
+    
+	stats->start_empty_time = sched_clock();
+	blkio_mark_blkg_empty(stats);
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_set_start_empty_time);
+
+void blkiocg_update_dequeue_stats(struct blkio_group *blkg,
+                                  unsigned long dequeue)
+{
+	blkg->stats.dequeue += dequeue;
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_dequeue_stats);
+#else
+static inline void blkio_set_start_group_wait_time(struct blkio_group *blkg,
+                                                   struct blkio_group *curr_blkg) {}
+static inline void blkio_end_empty_time(struct blkio_group_stats *stats) {}
+#endif
+
+void blkiocg_update_io_add_stats(struct blkio_group *blkg,
+                                 struct blkio_group *curr_blkg, bool direction,
+                                 bool sync)
+{
+	unsigned long flags;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	blkio_add_stat(blkg->stats.stat_arr[BLKIO_STAT_QUEUED], 1, direction,
+                   sync);
+	blkio_end_empty_time(&blkg->stats);
+	blkio_set_start_group_wait_time(blkg, curr_blkg);
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_io_add_stats);
+
+void blkiocg_update_io_remove_stats(struct blkio_group *blkg,
+                                    bool direction, bool sync)
+{
+	unsigned long flags;
+    
+	spin_lock_irqsave(&blkg->stats_lock, flags);
+	blkio_check_and_dec_stat(blkg->stats.stat_arr[BLKIO_STAT_QUEUED],
+                             direction, sync);
+	spin_unlock_irqrestore(&blkg->stats_lock, flags);
+}
+EXPORT_SYMBOL_GPL(blkiocg_update_io_remove_stats);
 
 void blkiocg_update_timeslice_used(struct blkio_group *blkg, unsigned long time)
 {
@@ -145,14 +346,13 @@ void blkiocg_add_blkio_group(struct blkio_cgroup *blkcg,
 	unsigned long flags;
     
 	spin_lock_irqsave(&blkcg->lock, flags);
+	spin_lock_init(&blkg->stats_lock);
 	rcu_assign_pointer(blkg->key, key);
 	blkg->blkcg_id = css_id(&blkcg->css);
 	hlist_add_head_rcu(&blkg->blkcg_node, &blkcg->blkg_list);
 	spin_unlock_irqrestore(&blkcg->lock, flags);
-#ifdef CONFIG_DEBUG_BLK_CGROUP
 	/* Need to take css reference ? */
 	cgroup_path(blkcg->css.cgroup, blkg->path, sizeof(blkg->path));
-#endif
 	blkg->dev = dev;
 }
 EXPORT_SYMBOL_GPL(blkiocg_add_blkio_group);
@@ -176,17 +376,16 @@ int blkiocg_del_blkio_group(struct blkio_group *blkg)
     
 	rcu_read_lock();
 	css = css_lookup(&blkio_subsys, blkg->blkcg_id);
-	if (!css)
-		goto out;
-    
-	blkcg = container_of(css, struct blkio_cgroup, css);
-	spin_lock_irqsave(&blkcg->lock, flags);
-	if (!hlist_unhashed(&blkg->blkcg_node)) {
-		__blkiocg_del_blkio_group(blkg);
-		ret = 0;
+	if (css) {
+		blkcg = container_of(css, struct blkio_cgroup, css);
+		spin_lock_irqsave(&blkcg->lock, flags);
+		if (!hlist_unhashed(&blkg->blkcg_node)) {
+			__blkiocg_del_blkio_group(blkg);
+			ret = 0;
+		}
+		spin_unlock_irqrestore(&blkcg->lock, flags);
 	}
-	spin_unlock_irqrestore(&blkcg->lock, flags);
-out:
+    
 	rcu_read_unlock();
 	return ret;
 }
@@ -229,6 +428,7 @@ blkiocg_weight_write(struct cgroup *cgroup, struct cftype *cftype, u64 val)
 	struct blkio_group *blkg;
 	struct hlist_node *n;
 	struct blkio_policy_type *blkiop;
+	struct blkio_policy_node *pn;
     
 	if (val < BLKIO_WEIGHT_MIN || val > BLKIO_WEIGHT_MAX)
 		return -EINVAL;
@@ -237,7 +437,13 @@ blkiocg_weight_write(struct cgroup *cgroup, struct cftype *cftype, u64 val)
 	spin_lock(&blkio_list_lock);
 	spin_lock_irq(&blkcg->lock);
 	blkcg->weight = (unsigned int)val;
+    
 	hlist_for_each_entry(blkg, n, &blkcg->blkg_list, blkcg_node) {
+		pn = blkio_policy_search_node(blkcg, blkg->dev);
+        
+		if (pn)
+			continue;
+        
 		list_for_each_entry(blkiop, &blkio_list, list)
         blkiop->ops.blkio_update_group_weight_fn(blkg,
                                                  blkcg->weight);
@@ -252,15 +458,44 @@ blkiocg_reset_stats(struct cgroup *cgroup, struct cftype *cftype, u64 val)
 {
 	struct blkio_cgroup *blkcg;
 	struct blkio_group *blkg;
-	struct hlist_node *n;
 	struct blkio_group_stats *stats;
+	struct hlist_node *n;
+	uint64_t queued[BLKIO_STAT_TOTAL];
+	int i;
+#ifdef CONFIG_DEBUG_BLK_CGROUP
+	bool idling, waiting, empty;
+	unsigned long long now = sched_clock();
+#endif
     
 	blkcg = cgroup_to_blkio_cgroup(cgroup);
 	spin_lock_irq(&blkcg->lock);
 	hlist_for_each_entry(blkg, n, &blkcg->blkg_list, blkcg_node) {
 		spin_lock(&blkg->stats_lock);
 		stats = &blkg->stats;
+#ifdef CONFIG_DEBUG_BLK_CGROUP
+		idling = blkio_blkg_idling(stats);
+		waiting = blkio_blkg_waiting(stats);
+		empty = blkio_blkg_empty(stats);
+#endif
+		for (i = 0; i < BLKIO_STAT_TOTAL; i++)
+			queued[i] = stats->stat_arr[BLKIO_STAT_QUEUED][i];
 		memset(stats, 0, sizeof(struct blkio_group_stats));
+		for (i = 0; i < BLKIO_STAT_TOTAL; i++)
+			stats->stat_arr[BLKIO_STAT_QUEUED][i] = queued[i];
+#ifdef CONFIG_DEBUG_BLK_CGROUP
+		if (idling) {
+			blkio_mark_blkg_idling(stats);
+			stats->start_idle_time = now;
+		}
+		if (waiting) {
+			blkio_mark_blkg_waiting(stats);
+			stats->start_group_wait_time = now;
+		}
+		if (empty) {
+			blkio_mark_blkg_empty(stats);
+			stats->start_empty_time = now;
+		}
+#endif
 		spin_unlock(&blkg->stats_lock);
 	}
 	spin_unlock_irq(&blkcg->lock);
@@ -323,6 +558,24 @@ static uint64_t blkio_get_stat(struct blkio_group *blkg,
 		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1,
                                blkg->stats.sectors, cb, dev);
 #ifdef CONFIG_DEBUG_BLK_CGROUP
+	if (type == BLKIO_STAT_AVG_QUEUE_SIZE) {
+		uint64_t sum = blkg->stats.avg_queue_size_sum;
+		uint64_t samples = blkg->stats.avg_queue_size_samples;
+		if (samples)
+			do_div(sum, samples);
+		else
+			sum = 0;
+		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1, sum, cb, dev);
+	}
+	if (type == BLKIO_STAT_GROUP_WAIT_TIME)
+		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1,
+                               blkg->stats.group_wait_time, cb, dev);
+	if (type == BLKIO_STAT_IDLE_TIME)
+		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1,
+                               blkg->stats.idle_time, cb, dev);
+	if (type == BLKIO_STAT_EMPTY_TIME)
+		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1,
+                               blkg->stats.empty_time, cb, dev);
 	if (type == BLKIO_STAT_DEQUEUE)
 		return blkio_fill_stat(key_str, MAX_KEY_LEN - 1,
                                blkg->stats.dequeue, cb, dev);
@@ -376,21 +629,210 @@ SHOW_FUNCTION_PER_GROUP(io_serviced, BLKIO_STAT_SERVICED, 1);
 SHOW_FUNCTION_PER_GROUP(io_service_time, BLKIO_STAT_SERVICE_TIME, 1);
 SHOW_FUNCTION_PER_GROUP(io_wait_time, BLKIO_STAT_WAIT_TIME, 1);
 SHOW_FUNCTION_PER_GROUP(io_merged, BLKIO_STAT_MERGED, 1);
+SHOW_FUNCTION_PER_GROUP(io_queued, BLKIO_STAT_QUEUED, 1);
 #ifdef CONFIG_DEBUG_BLK_CGROUP
 SHOW_FUNCTION_PER_GROUP(dequeue, BLKIO_STAT_DEQUEUE, 0);
+SHOW_FUNCTION_PER_GROUP(avg_queue_size, BLKIO_STAT_AVG_QUEUE_SIZE, 0);
+SHOW_FUNCTION_PER_GROUP(group_wait_time, BLKIO_STAT_GROUP_WAIT_TIME, 0);
+SHOW_FUNCTION_PER_GROUP(idle_time, BLKIO_STAT_IDLE_TIME, 0);
+SHOW_FUNCTION_PER_GROUP(empty_time, BLKIO_STAT_EMPTY_TIME, 0);
 #endif
 #undef SHOW_FUNCTION_PER_GROUP
 
-#ifdef CONFIG_DEBUG_BLK_CGROUP
-void blkiocg_update_dequeue_stats(struct blkio_group *blkg,
-                                  unsigned long dequeue)
+static int blkio_check_dev_num(dev_t dev)
 {
-	blkg->stats.dequeue += dequeue;
+	int part = 0;
+	struct gendisk *disk;
+    
+	disk = get_gendisk(dev, &part);
+	if (!disk || part)
+		return -ENODEV;
+    
+	return 0;
 }
-EXPORT_SYMBOL_GPL(blkiocg_update_dequeue_stats);
-#endif
+
+static int blkio_policy_parse_and_set(char *buf,
+                                      struct blkio_policy_node *newpn)
+{
+	char *s[4], *p, *major_s = NULL, *minor_s = NULL;
+	int ret;
+	unsigned long major, minor, temp;
+	int i = 0;
+	dev_t dev;
+    
+	memset(s, 0, sizeof(s));
+    
+	while ((p = strsep(&buf, " ")) != NULL) {
+		if (!*p)
+			continue;
+        
+		s[i++] = p;
+        
+		/* Prevent from inputing too many things */
+		if (i == 3)
+			break;
+	}
+    
+	if (i != 2)
+		return -EINVAL;
+    
+	p = strsep(&s[0], ":");
+	if (p != NULL)
+		major_s = p;
+	else
+		return -EINVAL;
+    
+	minor_s = s[0];
+	if (!minor_s)
+		return -EINVAL;
+    
+	ret = strict_strtoul(major_s, 10, &major);
+	if (ret)
+		return -EINVAL;
+    
+	ret = strict_strtoul(minor_s, 10, &minor);
+	if (ret)
+		return -EINVAL;
+    
+	dev = MKDEV(major, minor);
+    
+	ret = blkio_check_dev_num(dev);
+	if (ret)
+		return ret;
+    
+	newpn->dev = dev;
+    
+	if (s[1] == NULL)
+		return -EINVAL;
+    
+	ret = strict_strtoul(s[1], 10, &temp);
+	if (ret || (temp < BLKIO_WEIGHT_MIN && temp > 0) ||
+	    temp > BLKIO_WEIGHT_MAX)
+		return -EINVAL;
+    
+	newpn->weight =  temp;
+    
+	return 0;
+}
+
+unsigned int blkcg_get_weight(struct blkio_cgroup *blkcg,
+                              dev_t dev)
+{
+	struct blkio_policy_node *pn;
+    
+	pn = blkio_policy_search_node(blkcg, dev);
+	if (pn)
+		return pn->weight;
+	else
+		return blkcg->weight;
+}
+EXPORT_SYMBOL_GPL(blkcg_get_weight);
+
+
+static int blkiocg_weight_device_write(struct cgroup *cgrp, struct cftype *cft,
+                                       const char *buffer)
+{
+	int ret = 0;
+	char *buf;
+	struct blkio_policy_node *newpn, *pn;
+	struct blkio_cgroup *blkcg;
+	struct blkio_group *blkg;
+	int keep_newpn = 0;
+	struct hlist_node *n;
+	struct blkio_policy_type *blkiop;
+    
+	buf = kstrdup(buffer, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+    
+	newpn = kzalloc(sizeof(*newpn), GFP_KERNEL);
+	if (!newpn) {
+		ret = -ENOMEM;
+		goto free_buf;
+	}
+    
+	ret = blkio_policy_parse_and_set(buf, newpn);
+	if (ret)
+		goto free_newpn;
+    
+	blkcg = cgroup_to_blkio_cgroup(cgrp);
+    
+	spin_lock_irq(&blkcg->lock);
+    
+	pn = blkio_policy_search_node(blkcg, newpn->dev);
+	if (!pn) {
+		if (newpn->weight != 0) {
+			blkio_policy_insert_node(blkcg, newpn);
+			keep_newpn = 1;
+		}
+		spin_unlock_irq(&blkcg->lock);
+		goto update_io_group;
+	}
+    
+	if (newpn->weight == 0) {
+		/* weight == 0 means deleteing a specific weight */
+		blkio_policy_delete_node(pn);
+		spin_unlock_irq(&blkcg->lock);
+		goto update_io_group;
+	}
+	spin_unlock_irq(&blkcg->lock);
+    
+	pn->weight = newpn->weight;
+    
+update_io_group:
+	/* update weight for each cfqg */
+	spin_lock(&blkio_list_lock);
+	spin_lock_irq(&blkcg->lock);
+    
+	hlist_for_each_entry(blkg, n, &blkcg->blkg_list, blkcg_node) {
+		if (newpn->dev == blkg->dev) {
+			list_for_each_entry(blkiop, &blkio_list, list)
+            blkiop->ops.blkio_update_group_weight_fn(blkg,
+                                                     newpn->weight ?
+                                                     newpn->weight :
+                                                     blkcg->weight);
+		}
+	}
+    
+	spin_unlock_irq(&blkcg->lock);
+	spin_unlock(&blkio_list_lock);
+    
+free_newpn:
+	if (!keep_newpn)
+		kfree(newpn);
+free_buf:
+	kfree(buf);
+	return ret;
+}
+
+static int blkiocg_weight_device_read(struct cgroup *cgrp, struct cftype *cft,
+                                      struct seq_file *m)
+{
+	struct blkio_cgroup *blkcg;
+	struct blkio_policy_node *pn;
+    
+	seq_printf(m, "dev\tweight\n");
+    
+	blkcg = cgroup_to_blkio_cgroup(cgrp);
+	if (!list_empty(&blkcg->policy_list)) {
+		spin_lock_irq(&blkcg->lock);
+		list_for_each_entry(pn, &blkcg->policy_list, node) {
+			seq_printf(m, "%u:%u\t%u\n", MAJOR(pn->dev),
+                       MINOR(pn->dev), pn->weight);
+		}
+		spin_unlock_irq(&blkcg->lock);
+	}
+    
+	return 0;
+}
 
 struct cftype blkio_files[] = {
+	{
+		.name = "weight_device",
+		.read_seq_string = blkiocg_weight_device_read,
+		.write_string = blkiocg_weight_device_write,
+		.max_write_len = 256,
+	},
 	{
 		.name = "weight",
 		.read_u64 = blkiocg_weight_read,
@@ -425,14 +867,34 @@ struct cftype blkio_files[] = {
 		.read_map = blkiocg_io_merged_read,
 	},
 	{
+		.name = "io_queued",
+		.read_map = blkiocg_io_queued_read,
+	},
+	{
 		.name = "reset_stats",
 		.write_u64 = blkiocg_reset_stats,
 	},
 #ifdef CONFIG_DEBUG_BLK_CGROUP
-    {
+	{
+		.name = "avg_queue_size",
+		.read_map = blkiocg_avg_queue_size_read,
+	},
+	{
+		.name = "group_wait_time",
+		.read_map = blkiocg_group_wait_time_read,
+	},
+	{
+		.name = "idle_time",
+		.read_map = blkiocg_idle_time_read,
+	},
+	{
+		.name = "empty_time",
+		.read_map = blkiocg_empty_time_read,
+	},
+	{
 		.name = "dequeue",
 		.read_map = blkiocg_dequeue_read,
-    },
+	},
 #endif
 };
 
@@ -449,37 +911,42 @@ static void blkiocg_destroy(struct cgroup_subsys *subsys, struct cgroup *cgroup)
 	struct blkio_group *blkg;
 	void *key;
 	struct blkio_policy_type *blkiop;
+	struct blkio_policy_node *pn, *pntmp;
     
 	rcu_read_lock();
-remove_entry:
-	spin_lock_irqsave(&blkcg->lock, flags);
-    
-	if (hlist_empty(&blkcg->blkg_list)) {
+	do {
+		spin_lock_irqsave(&blkcg->lock, flags);
+        
+		if (hlist_empty(&blkcg->blkg_list)) {
+			spin_unlock_irqrestore(&blkcg->lock, flags);
+			break;
+		}
+        
+		blkg = hlist_entry(blkcg->blkg_list.first, struct blkio_group,
+                           blkcg_node);
+		key = rcu_dereference(blkg->key);
+		__blkiocg_del_blkio_group(blkg);
+        
 		spin_unlock_irqrestore(&blkcg->lock, flags);
-		goto done;
+        
+		/*
+		 * This blkio_group is being unlinked as associated cgroup is
+		 * going away. Let all the IO controlling policies know about
+		 * this event. Currently this is static call to one io
+		 * controlling policy. Once we have more policies in place, we
+		 * need some dynamic registration of callback function.
+		 */
+		spin_lock(&blkio_list_lock);
+		list_for_each_entry(blkiop, &blkio_list, list)
+        blkiop->ops.blkio_unlink_group_fn(key, blkg);
+		spin_unlock(&blkio_list_lock);
+	} while (1);
+    
+	list_for_each_entry_safe(pn, pntmp, &blkcg->policy_list, node) {
+		blkio_policy_delete_node(pn);
+		kfree(pn);
 	}
     
-	blkg = hlist_entry(blkcg->blkg_list.first, struct blkio_group,
-                       blkcg_node);
-	key = rcu_dereference(blkg->key);
-	__blkiocg_del_blkio_group(blkg);
-    
-	spin_unlock_irqrestore(&blkcg->lock, flags);
-    
-	/*
-	 * This blkio_group is being unlinked as associated cgroup is going
-	 * away. Let all the IO controlling policies know about this event.
-	 *
-	 * Currently this is static call to one io controlling policy. Once
-	 * we have more policies in place, we need some dynamic registration
-	 * of callback function.
-	 */
-	spin_lock(&blkio_list_lock);
-	list_for_each_entry(blkiop, &blkio_list, list)
-    blkiop->ops.blkio_unlink_group_fn(key, blkg);
-	spin_unlock(&blkio_list_lock);
-	goto remove_entry;
-done:
 	free_css_id(&blkio_subsys, &blkcg->css);
 	rcu_read_unlock();
 	if (blkcg != &blkio_root_cgroup)
@@ -489,16 +956,16 @@ done:
 static struct cgroup_subsys_state *
 blkiocg_create(struct cgroup_subsys *subsys, struct cgroup *cgroup)
 {
-	struct blkio_cgroup *blkcg, *parent_blkcg;
+	struct blkio_cgroup *blkcg;
+	struct cgroup *parent = cgroup->parent;
     
-	if (!cgroup->parent) {
+	if (!parent) {
 		blkcg = &blkio_root_cgroup;
 		goto done;
 	}
     
 	/* Currently we do not support hierarchy deeper than two level (0,1) */
-	parent_blkcg = cgroup_to_blkio_cgroup(cgroup->parent);
-	if (css_depth(&parent_blkcg->css) > 0)
+	if (parent != cgroup->top_cgroup)
 		return ERR_PTR(-EINVAL);
     
 	blkcg = kzalloc(sizeof(*blkcg), GFP_KERNEL);
@@ -510,6 +977,7 @@ done:
 	spin_lock_init(&blkcg->lock);
 	INIT_HLIST_HEAD(&blkcg->blkg_list);
     
+	INIT_LIST_HEAD(&blkcg->policy_list);
 	return &blkcg->css;
 }
 

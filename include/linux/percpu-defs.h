@@ -2,12 +2,6 @@
 #define _LINUX_PERCPU_DEFS_H
 
 /*
- * Determine the real variable name from the name visible in the
- * kernel sources.
- */
-#define per_cpu_var(var) per_cpu__##var
-
-/*
  * Base implementations of per-CPU variable declarations and definitions, where
  * the section in which the variable is to be placed is provided by the
  * 'sec' argument.  This may be used to affect the parameters governing the
@@ -18,11 +12,21 @@
  * that section.
  */
 #define __PCPU_ATTRS(sec)						\
-	__attribute__((section(PER_CPU_BASE_SECTION sec)))		\
-	PER_CPU_ATTRIBUTES
+__percpu __attribute__((section(PER_CPU_BASE_SECTION sec)))	\
+PER_CPU_ATTRIBUTES
 
 #define __PCPU_DUMMY_ATTRS						\
-	__attribute__((section(".discard"), unused))
+__attribute__((section(".discard"), unused))
+
+/*
+ * Macro which verifies @ptr is a percpu pointer without evaluating
+ * @ptr.  This is to be used in percpu accessors to verify that the
+ * input parameter is a percpu pointer.
+ */
+#define __verify_pcpu_ptr(ptr)	do {					\
+void __percpu *__vpp_verify = (typeof(ptr))NULL;		\
+(void)__vpp_verify;						\
+} while (0)
 
 /*
  * s390 and alpha modules require percpu variables to be defined as
@@ -55,24 +59,25 @@
  * variables to share the same address, can be detected during build.
  */
 #define DECLARE_PER_CPU_SECTION(type, name, sec)			\
-	extern __PCPU_DUMMY_ATTRS char __pcpu_scope_##name;		\
-	extern __PCPU_ATTRS(sec) __typeof__(type) per_cpu__##name
+extern __PCPU_DUMMY_ATTRS char __pcpu_scope_##name;		\
+extern __PCPU_ATTRS(sec) __typeof__(type) name
 
 #define DEFINE_PER_CPU_SECTION(type, name, sec)				\
-	__PCPU_DUMMY_ATTRS char __pcpu_scope_##name;			\
-	__PCPU_DUMMY_ATTRS char __pcpu_unique_##name;			\
-	__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES __weak			\
-	__typeof__(type) per_cpu__##name
+__PCPU_DUMMY_ATTRS char __pcpu_scope_##name;			\
+extern __PCPU_DUMMY_ATTRS char __pcpu_unique_##name;		\
+__PCPU_DUMMY_ATTRS char __pcpu_unique_##name;			\
+__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES __weak			\
+__typeof__(type) name
 #else
 /*
  * Normal declaration and definition macros.
  */
 #define DECLARE_PER_CPU_SECTION(type, name, sec)			\
-	extern __PCPU_ATTRS(sec) __typeof__(type) per_cpu__##name
+extern __PCPU_ATTRS(sec) __typeof__(type) name
 
 #define DEFINE_PER_CPU_SECTION(type, name, sec)				\
-	__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES			\
-	__typeof__(type) per_cpu__##name
+__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES			\
+__typeof__(type) name
 #endif
 
 /*
@@ -80,20 +85,20 @@
  * ordinary per-CPU variables.
  */
 #define DECLARE_PER_CPU(type, name)					\
-	DECLARE_PER_CPU_SECTION(type, name, "")
+DECLARE_PER_CPU_SECTION(type, name, "")
 
 #define DEFINE_PER_CPU(type, name)					\
-	DEFINE_PER_CPU_SECTION(type, name, "")
+DEFINE_PER_CPU_SECTION(type, name, "")
 
 /*
  * Declaration/definition used for per-CPU variables that must come first in
  * the set of variables.
  */
 #define DECLARE_PER_CPU_FIRST(type, name)				\
-	DECLARE_PER_CPU_SECTION(type, name, PER_CPU_FIRST_SECTION)
+DECLARE_PER_CPU_SECTION(type, name, PER_CPU_FIRST_SECTION)
 
 #define DEFINE_PER_CPU_FIRST(type, name)				\
-	DEFINE_PER_CPU_SECTION(type, name, PER_CPU_FIRST_SECTION)
+DEFINE_PER_CPU_SECTION(type, name, PER_CPU_FIRST_SECTION)
 
 /*
  * Declaration/definition used for per-CPU variables that must be cacheline
@@ -107,37 +112,43 @@
  * by a CPU processing a read from a proc file.
  */
 #define DECLARE_PER_CPU_SHARED_ALIGNED(type, name)			\
-	DECLARE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
-	____cacheline_aligned_in_smp
+DECLARE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
+____cacheline_aligned_in_smp
 
 #define DEFINE_PER_CPU_SHARED_ALIGNED(type, name)			\
-	DEFINE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
-	____cacheline_aligned_in_smp
+DEFINE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
+____cacheline_aligned_in_smp
 
 #define DECLARE_PER_CPU_ALIGNED(type, name)				\
-	DECLARE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
-	____cacheline_aligned
+DECLARE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
+____cacheline_aligned
 
 #define DEFINE_PER_CPU_ALIGNED(type, name)				\
-	DEFINE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
-	____cacheline_aligned
+DEFINE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
+____cacheline_aligned
 
 /*
  * Declaration/definition used for per-CPU variables that must be page aligned.
  */
 #define DECLARE_PER_CPU_PAGE_ALIGNED(type, name)			\
-	DECLARE_PER_CPU_SECTION(type, name, ".page_aligned")		\
-	__aligned(PAGE_SIZE)
+DECLARE_PER_CPU_SECTION(type, name, ".page_aligned")		\
+__aligned(PAGE_SIZE)
 
 #define DEFINE_PER_CPU_PAGE_ALIGNED(type, name)				\
-	DEFINE_PER_CPU_SECTION(type, name, ".page_aligned")		\
-	__aligned(PAGE_SIZE)
+DEFINE_PER_CPU_SECTION(type, name, ".page_aligned")		\
+__aligned(PAGE_SIZE)
 
 /*
- * Intermodule exports for per-CPU variables.
+ * Intermodule exports for per-CPU variables.  sparse forgets about
+ * address space across EXPORT_SYMBOL(), change EXPORT_SYMBOL() to
+ * noop if __CHECKER__.
  */
-#define EXPORT_PER_CPU_SYMBOL(var) EXPORT_SYMBOL(per_cpu__##var)
-#define EXPORT_PER_CPU_SYMBOL_GPL(var) EXPORT_SYMBOL_GPL(per_cpu__##var)
-
+#ifndef __CHECKER__
+#define EXPORT_PER_CPU_SYMBOL(var) EXPORT_SYMBOL(var)
+#define EXPORT_PER_CPU_SYMBOL_GPL(var) EXPORT_SYMBOL_GPL(var)
+#else
+#define EXPORT_PER_CPU_SYMBOL(var)
+#define EXPORT_PER_CPU_SYMBOL_GPL(var)
+#endif
 
 #endif /* _LINUX_PERCPU_DEFS_H */

@@ -1797,7 +1797,7 @@ static int cciss_add_disk(ctlr_info_t *h, struct gendisk *disk,
 
 	blk_queue_max_segments(disk->queue, h->maxsgentries);
 
-	blk_queue_max_sectors(disk->queue, h->cciss_max_sectors);
+	blk_queue_max_hw_sectors(disk->queue, h->cciss_max_sectors);
 
 	blk_queue_softirq_done(disk->queue, cciss_softirq_done);
 
