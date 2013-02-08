@@ -15,6 +15,7 @@
 #include <linux/console.h>
 #include <linux/cpu.h>
 #include <linux/syscalls.h>
+#include <linux/syscore_ops.h>
 
 #include "power.h"
 #include "nvrm_power_private.h"
@@ -165,6 +166,8 @@ static int suspend_enter(suspend_state_t state)
 	BUG_ON(!irqs_disabled());
 
 	error = sysdev_suspend(PMSG_SUSPEND);
+    if (!error)
+        error = syscore_suspend();
 	if (!error) {
 		if (!suspend_test(TEST_CORE))
 			error = suspend_ops->enter(state);
@@ -174,6 +177,7 @@ static int suspend_enter(suspend_state_t state)
 	printk("# AP20 chip wakeup \n");
 	star_emergency_restart("sys",62);
 #endif
+        syscore_resume();
 		sysdev_resume();
 	}
 
