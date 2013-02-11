@@ -21,6 +21,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/init.h>
+#include <linux/ksm.h>
 #include <linux/rmap.h>
 #include <linux/security.h>
 #include <linux/backing-dev.h>
@@ -39,6 +40,7 @@
 static bool swap_count_continued(struct swap_info_struct *, pgoff_t,
                                  unsigned char);
 static void free_swap_count_continuations(struct swap_info_struct *);
+static sector_t map_swap_entry(swp_entry_t, struct block_device**);
 
 DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
@@ -659,6 +661,8 @@ int reuse_swap_page(struct page *page)
 	int count;
     
 	VM_BUG_ON(!PageLocked(page));
+    if (unlikely(PageKsm(page)))
+        return 0;
 	count = page_mapcount(page);
 	if (count <= 1 && PageSwapCache(page)) {
 		count += page_swapcount(page);
@@ -667,7 +671,7 @@ int reuse_swap_page(struct page *page)
 			SetPageDirty(page);
 		}
 	}
-	return count == 1;
+	return count <= 1;
 }
 
 /*
@@ -792,7 +796,7 @@ sector_t swapdev_block(int type, pgoff_t offset)
 		return 0;
 	if (!(swap_info[type]->flags & SWP_WRITEOK))
 		return 0;
-	return map_swap_page(swp_entry(type, offset), &bdev);
+	return map_swap_entry(swp_entry(type, offset), &bdev);
 }
 
 /*
@@ -1277,7 +1281,7 @@ static void drain_mmlist(void)
  * corresponds to page offset `offset'.  Note that the type of this function
  * is sector_t, but it returns page offset into the bdev, not sector offset.
  */
-sector_t map_swap_page(swp_entry_t entry, struct block_device **bdev)
+static sector_t map_swap_entry(swp_entry_t entry, struct block_device **bdev)
 {
 	struct swap_info_struct *sis;
 	struct swap_extent *start_se;
@@ -1303,6 +1307,16 @@ sector_t map_swap_page(swp_entry_t entry, struct block_device **bdev)
 		sis->curr_swap_extent = se;
 		BUG_ON(se == start_se);		/* It *must* be present */
 	}
+}
+
+/*
+ * Returns the page offset into bdev for the specified page's swap entry.
+ */
+sector_t map_swap_page(struct page *page, struct block_device **bdev)
+{
+    swp_entry_t entry;
+    entry.val = page_private(page);
+    return map_swap_entry(entry, bdev);
 }
 
 /*

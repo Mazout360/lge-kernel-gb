@@ -2711,10 +2711,11 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
     
 	locked = lock_page_or_retry(page, mm, flags);
 	delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
-	if (!locked) {
-		ret |= VM_FAULT_RETRY;
-		goto out_release;
-	}
+	page = ksm_might_need_to_copy(page, vma, address);
+    if (!page) {
+        ret = VM_FAULT_OOM;
+        goto out;
+    }
     
 	if (mem_cgroup_try_charge_swapin(mm, page, GFP_KERNEL, &ptr)) {
 		ret = VM_FAULT_OOM;

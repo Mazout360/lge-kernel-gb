@@ -66,18 +66,16 @@ static inline unsigned long page_order(struct page *page)
 	return page_private(page);
 }
 
-#ifdef CONFIG_HAVE_MLOCK
+#ifdef CONFIG_MMU
 extern long mlock_vma_pages_range(struct vm_area_struct *vma,
-			unsigned long start, unsigned long end);
+                                   unsigned long start, unsigned long end);
 extern void munlock_vma_pages_range(struct vm_area_struct *vma,
-			unsigned long start, unsigned long end);
+                                     unsigned long start, unsigned long end);
 static inline void munlock_vma_pages_all(struct vm_area_struct *vma)
 {
-	munlock_vma_pages_range(vma, vma->vm_start, vma->vm_end);
+    munlock_vma_pages_range(vma, vma->vm_start, vma->vm_end);
 }
-#endif
 
-#ifdef CONFIG_HAVE_MLOCKED_PAGE_BIT
 /*
  * Called only in fault path via page_evictable() for a new page
  * to determine if it's being mapped into a LOCKED vma.
