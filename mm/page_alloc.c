@@ -230,6 +230,15 @@ static inline int bad_range(struct zone *zone, struct page *page)
 }
 #endif
 
+static __init int setup_page_sanitization(char *s)
+{
+    printk(KERN_INFO "Memory sanitization enabled.\n");
+    sanitize_all_mem = 1;
+    
+    return 0;
+}
+early_param("sanitize_mem", setup_page_sanitization);
+
 static void bad_page(struct page *page)
 {
 	static unsigned long resume;
@@ -584,6 +593,7 @@ static void free_one_page(struct zone *zone, struct page *page, int order,
 
 static void __free_pages_ok(struct page *page, unsigned int order)
 {
+    unsigned long index = 1UL << order;
 	unsigned long flags;
 	int i;
 	int bad = 0;
@@ -601,6 +611,16 @@ static void __free_pages_ok(struct page *page, unsigned int order)
 		debug_check_no_obj_freed(page_address(page),
 					   PAGE_SIZE << order);
 	}
+    
+    /*
+     * Page sanitization is enabled, let's clear the page contents before
+     * release.
+     */
+    if (sanitize_all_mem) {
+        for (; index; --index)
+            sanitize_highpage(page + index - 1);
+    }
+    
 	arch_free_page(page, order);
 	kernel_map_pages(page, 1 << order, 0);
 
@@ -704,7 +724,7 @@ static int prep_new_page(struct page *page, int order, gfp_t gfp_flags)
 	arch_alloc_page(page, order);
 	kernel_map_pages(page, 1 << order, 1);
 
-	if (gfp_flags & __GFP_ZERO)
+	if ((gfp_flags & __GFP_ZERO) && !sanitize_all_mem)
 		prep_zero_page(page, order, gfp_flags);
 
 	if (order && (gfp_flags & __GFP_COMP))
@@ -1099,6 +1119,10 @@ static void free_hot_cold_page(struct page *page, int cold)
 		debug_check_no_locks_freed(page_address(page), PAGE_SIZE);
 		debug_check_no_obj_freed(page_address(page), PAGE_SIZE);
 	}
+    
+    if (sanitize_all_mem)
+        sanitize_highpage(page);
+    
 	arch_free_page(page, 0);
 	kernel_map_pages(page, 1, 0);
 
