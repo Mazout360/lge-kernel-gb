@@ -1358,7 +1358,7 @@ ORIGINAL */
 static void tegra_setup_rfkill(void) { }
 #endif
 
-#if defined(CONFIG_TOUCHSCREEN_TEGRA_ODM) || defined(CONFIG_HACKFEST_INPUT)
+#if defined(CONFIG_TOUCHSCREEN_TEGRA_ODM) || defined(CONFIG_HACKFEST)
 static struct platform_device tegra_touch_device = {
 	.name = "tegra_touch",
 	.id = -1,
@@ -1704,7 +1704,7 @@ static struct platform_device *nvodm_devices[] __initdata = {
 #ifdef CONFIG_REGULATOR_TEGRA
 	&tegra_regulator_device,
 #endif
-#if defined(CONFIG_TOUCHSCREEN_TEGRA_ODM) || defined(CONFIG_HACKFEST_INPUT)
+#if defined(CONFIG_TOUCHSCREEN_TEGRA_ODM) || defined(CONFIG_HACKFEST)
 	&tegra_touch_device,
 #endif
 #ifdef CONFIG_INPUT_TEGRA_ODM_SCROLL
