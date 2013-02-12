@@ -1057,6 +1057,46 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 }
 EXPORT_SYMBOL(do_mmap_pgoff);
 
+SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
+                unsigned long, prot, unsigned long, flags,
+                unsigned long, fd, unsigned long, pgoff)
+{
+	struct file *file = NULL;
+	unsigned long retval = -EBADF;
+    
+	if (!(flags & MAP_ANONYMOUS)) {
+		if (unlikely(flags & MAP_HUGETLB))
+			return -EINVAL;
+		file = fget(fd);
+		if (!file)
+			goto out;
+	} else if (flags & MAP_HUGETLB) {
+		struct user_struct *user = NULL;
+		/*
+		 * VM_NORESERVE is used because the reservations will be
+		 * taken when vm_ops->mmap() is called
+		 * A dummy user value is used because we are not locking
+		 * memory so no accounting is necessary
+		 */
+		len = ALIGN(len, huge_page_size(&default_hstate));
+		file = hugetlb_file_setup(HUGETLB_ANON_FILE, len, VM_NORESERVE,
+                                  &user, HUGETLB_ANONHUGE_INODE);
+		if (IS_ERR(file))
+			return PTR_ERR(file);
+	}
+    
+	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+    
+	down_write(&current->mm->mmap_sem);
+	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	up_write(&current->mm->mmap_sem);
+    
+	if (file)
+		fput(file);
+out:
+	return retval;
+}
+
 /*
  * Some shared mappigns will want the pages marked read-only
  * to track write events. If so, we'll downgrade vm_page_prot
@@ -1212,8 +1252,21 @@ munmap_back:
 			goto free_vma;
 	}
 
-	if (vma_wants_writenotify(vma))
-		vma->vm_page_prot = vm_get_page_prot(vm_flags & ~VM_SHARED);
+	if (vma_wants_writenotify(vma)) {
+        pgprot_t pprot = vma->vm_page_prot;
+
+            /* Can vma->vm_page_prot have changed??
+              *
+              * Answer: Yes, drivers may have changed it in their
+              *         f_op->mmap method.
+              *
+              * Ensures that vmas marked as uncached stay that way.
+              */
+
+        vma->vm_page_prot = vm_get_page_prot(vm_flags & ~VM_SHARED);
+        if (pgprot_val(pprot) == pgprot_val(pgprot_noncached(pprot)))
+            vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+    }
 
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	file = vma->vm_file;

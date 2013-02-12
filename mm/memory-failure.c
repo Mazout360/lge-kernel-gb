@@ -52,6 +52,8 @@ int sysctl_memory_failure_recovery __read_mostly = 1;
 
 atomic_long_t mce_bad_pages __read_mostly = ATOMIC_LONG_INIT(0);
 
+#if defined(CONFIG_HWPOISON_INJECT) || defined(CONFIG_HWPOISON_INJECT_MODULE)
+
 u32 hwpoison_filter_enable = 0;
 u32 hwpoison_filter_dev_major = ~0U;
 u32 hwpoison_filter_dev_minor = ~0U;
@@ -164,6 +166,12 @@ int hwpoison_filter(struct page *p)
     
 	return 0;
 }
+#else
+int hwpoison_filter(struct page *p)
+{
+    return 0;
+}
+#endif
 EXPORT_SYMBOL_GPL(hwpoison_filter);
 
 /*
@@ -1113,7 +1121,8 @@ EXPORT_SYMBOL(unpoison_memory);
 
 static struct page *new_page(struct page *p, unsigned long private, int **x)
 {
-	return alloc_pages(GFP_HIGHUSER_MOVABLE, 0);
+	int nid = page_to_nid(p);
+    return alloc_pages_exact_node(nid, GFP_HIGHUSER_MOVABLE, 0);
 }
 
 /*

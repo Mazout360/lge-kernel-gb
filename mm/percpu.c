@@ -1270,7 +1270,7 @@ static void pcpu_reclaim(struct work_struct *work)
  */
 void free_percpu(void *ptr)
 {
-	void *addr = __pcpu_ptr_to_addr(ptr);
+	void *addr;
 	struct pcpu_chunk *chunk;
 	unsigned long flags;
 	int off;
@@ -1278,7 +1278,7 @@ void free_percpu(void *ptr)
 	if (!ptr)
 		return;
 
-	spin_lock_irqsave(&pcpu_lock, flags);
+	addr = __pcpu_ptr_to_addr(ptr);
 
 	chunk = pcpu_chunk_addr_search(addr);
 	off = addr - chunk->base_addr;
