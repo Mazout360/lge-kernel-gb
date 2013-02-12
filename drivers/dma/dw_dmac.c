@@ -1269,9 +1269,7 @@ static int __init dw_probe(struct platform_device *pdev)
 		err = -EBUSY;
 		goto err_kfree;
 	}
-
-	memset(dw, 0, sizeof *dw);
-
+    
 	dw->regs = ioremap(io->start, DW_REGLEN);
 	if (!dw->regs) {
 		err = -ENOMEM;
