@@ -629,7 +629,7 @@ generic_getxattr(struct dentry *dentry, const char *name, void *buffer, size_t s
 ssize_t
 generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
 {
-	struct xattr_handler *handler, **handlers = dentry->d_sb->s_xattr
+	struct xattr_handler *handler, **handlers = dentry->d_sb->s_xattr;
 	unsigned int size = 0;
 
 	if (!buffer) {

@@ -65,6 +65,12 @@ struct msghdr {
 	unsigned	msg_flags;
 };
 
+/* For recvmmsg/sendmmsg */
+struct mmsghdr {
+    struct msghdr   msg_hdr;
+    unsigned        msg_len;
+};
+
 /*
  *	POSIX 1003.1g - ancillary data object information
  *	Ancillary data consits of a sequence of pairs of
@@ -311,6 +317,10 @@ extern int memcpy_toiovecend(const struct iovec *v, unsigned char *kdata,
 extern int move_addr_to_user(struct sockaddr *kaddr, int klen, void __user *uaddr, int __user *ulen);
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
+struct timespec;
+
+extern int __sys_recvmmsg(int fd, struct mmsghdr __user *mmsg, unsigned int vlen,
+                           unsigned int flags, struct timespec *timeout);
 
 #endif
 #endif /* not kernel and not glibc */

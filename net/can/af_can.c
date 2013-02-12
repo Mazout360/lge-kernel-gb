@@ -114,7 +114,7 @@ static void can_sock_destruct(struct sock *sk)
 	skb_queue_purge(&sk->sk_receive_queue);
 }
 
-static int can_create(struct net *net, struct socket *sock, int protocol)
+static int can_create(struct net *net, struct socket *sock, int protocol, int kern)
 {
 	struct sock *sk;
 	struct can_proto *cp;
