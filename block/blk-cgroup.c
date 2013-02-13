@@ -86,6 +86,13 @@ struct blkio_cgroup *cgroup_to_blkio_cgroup(struct cgroup *cgroup)
 }
 EXPORT_SYMBOL_GPL(cgroup_to_blkio_cgroup);
 
+struct blkio_cgroup *task_blkio_cgroup(struct task_struct *tsk)
+{
+    return container_of(task_subsys_state(tsk, blkio_subsys_id),
+                           struct blkio_cgroup, css);
+}
+EXPORT_SYMBOL_GPL(task_blkio_cgroup);
+
 /*
  * Add to the appropriate stat variable depending on the request type.
  * This should be called with the blkg->stats_lock held.
