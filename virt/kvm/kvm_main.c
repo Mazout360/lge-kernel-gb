@@ -1273,7 +1273,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 			     KVM_PAGES_PER_HPAGE(level);
 		lpages -= base_gfn / KVM_PAGES_PER_HPAGE(level);
 
-		new.lpage_info[i] = vzalloc(lpages * sizeof(*new.lpage_info[i]));
+		new.lpage_info[i] = vmalloc(lpages * sizeof(*new.lpage_info[i]));
 
 		if (!new.lpage_info[i])
 			goto out_free;

@@ -1725,7 +1725,7 @@ static int ext4_fill_flex_info(struct super_block *sb)
 	size = flex_group_count * sizeof(struct flex_groups);
 	sbi->s_flex_groups = kzalloc(size, GFP_KERNEL);
 	if (sbi->s_flex_groups == NULL) {
-		sbi->s_flex_groups = vzalloc(size);
+		sbi->s_flex_groups = vmalloc(size);
 		if (sbi->s_flex_groups)
 			memset(sbi->s_flex_groups, 0, size);
 	}

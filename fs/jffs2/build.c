@@ -335,7 +335,7 @@ int jffs2_do_mount_fs(struct jffs2_sb_info *c)
 	size = sizeof(struct jffs2_eraseblock) * c->nr_blocks;
 #ifndef __ECOS
 	if (jffs2_blocks_use_vmalloc(c))
-		c->blocks = vzalloc(size);
+		c->blocks = vmalloc(size);
 	else
 #endif
 		c->blocks = kmalloc(size, GFP_KERNEL);

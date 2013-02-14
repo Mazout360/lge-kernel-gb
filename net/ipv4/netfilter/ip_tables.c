@@ -950,7 +950,7 @@ static struct xt_counters * alloc_counters(struct xt_table *table)
 	   (other than comefrom, which userspace doesn't care
 	   about). */
 	countersize = sizeof(struct xt_counters) * private->number;
-	counters = vzalloc(countersize);
+	counters = vmalloc_node(countersize, numa_node_id());
 
 	if (counters == NULL)
 		return ERR_PTR(-ENOMEM);
@@ -1217,7 +1217,7 @@ __do_replace(struct net *net, const char *name, unsigned int valid_hooks,
 	void *loc_cpu_old_entry;
 
 	ret = 0;
-	counters = vzalloc(num_counters * sizeof(struct xt_counters));
+	counters = vmalloc(num_counters * sizeof(struct xt_counters));
 	if (!counters) {
 		ret = -ENOMEM;
 		goto out;

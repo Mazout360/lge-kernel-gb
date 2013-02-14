@@ -3200,7 +3200,7 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 		mem = kmalloc(size, GFP_KERNEL);
 	else
 		mem = vmalloc(size);
-    
+
 	if (mem)
 		memset(mem, 0, size);
 	return mem;
