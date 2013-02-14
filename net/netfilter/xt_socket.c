@@ -29,6 +29,16 @@
 #include <net/netfilter/nf_conntrack.h>
 #endif
 
+void
+xt_socket_put_sk(struct sock *sk)
+{
+	if (sk->sk_state == TCP_TIME_WAIT)
+		inet_twsk_put(inet_twsk(sk));
+	else
+		sock_put(sk);
+}
+EXPORT_SYMBOL(xt_socket_put_sk);
+
 static int
 extract_icmp_fields(const struct sk_buff *skb,
 		    u8 *protocol,
@@ -86,10 +96,8 @@ extract_icmp_fields(const struct sk_buff *skb,
 	return 0;
 }
 
-
-static bool
-socket_match(const struct sk_buff *skb, const struct xt_match_param *par,
-	     const struct xt_socket_mtinfo1 *info)
+struct sock*
+xt_socket_get4_sk(const struct sk_buff *skb, struct xt_match_param *par)
 {
 	const struct iphdr *iph = ip_hdr(skb);
 	struct udphdr _hdr, *hp = NULL;
@@ -101,76 +109,87 @@ socket_match(const struct sk_buff *skb, const struct xt_match_param *par,
 	struct nf_conn const *ct;
 	enum ip_conntrack_info ctinfo;
 #endif
-
+    
 	if (iph->protocol == IPPROTO_UDP || iph->protocol == IPPROTO_TCP) {
 		hp = skb_header_pointer(skb, ip_hdrlen(skb),
-					sizeof(_hdr), &_hdr);
+                                sizeof(_hdr), &_hdr);
 		if (hp == NULL)
-			return false;
-
+			return NULL;
+        
 		protocol = iph->protocol;
 		saddr = iph->saddr;
 		sport = hp->source;
 		daddr = iph->daddr;
 		dport = hp->dest;
-
+        
 	} else if (iph->protocol == IPPROTO_ICMP) {
 		if (extract_icmp_fields(skb, &protocol, &saddr, &daddr,
-					&sport, &dport))
-			return false;
+                                 &sport, &dport))
+			return NULL;
 	} else {
-		return false;
+		return NULL;
 	}
-
+    
 #ifdef XT_SOCKET_HAVE_CONNTRACK
 	/* Do the lookup with the original socket address in case this is a
 	 * reply packet of an established SNAT-ted connection. */
-
+    
 	ct = nf_ct_get(skb, &ctinfo);
-	if (ct && (ct != &nf_conntrack_untracked) &&
+	if (ct && !nf_ct_is_untracked(ct) &&
 	    ((iph->protocol != IPPROTO_ICMP &&
-	      ctinfo == IP_CT_IS_REPLY + IP_CT_ESTABLISHED) ||
+	      ctinfo == IP_CT_ESTABLISHED + IP_CT_IS_REPLY) ||
 	     (iph->protocol == IPPROTO_ICMP &&
-	      ctinfo == IP_CT_IS_REPLY + IP_CT_RELATED)) &&
+	      ctinfo == IP_CT_RELATED + IP_CT_IS_REPLY)) &&
 	    (ct->status & IPS_SRC_NAT_DONE)) {
-
+        
 		daddr = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
 		dport = (iph->protocol == IPPROTO_TCP) ?
-			ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port :
-			ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port;
+        ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port :
+        ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port;
 	}
 #endif
-
+    
 	sk = nf_tproxy_get_sock_v4(dev_net(skb->dev), protocol,
-				   saddr, daddr, sport, dport, par->in, false);
+                               saddr, daddr, sport, dport, par->in, NFT_LOOKUP_ANY);
+    
+	pr_debug("proto %hhu %pI4:%hu -> %pI4:%hu (orig %pI4:%hu) sock %p\n",
+             protocol, &saddr, ntohs(sport),
+             &daddr, ntohs(dport),
+             &iph->daddr, hp ? ntohs(hp->dest) : 0, sk);
+    
+	return sk;
+}
+EXPORT_SYMBOL(xt_socket_get4_sk);
+
+static bool
+socket_match(const struct sk_buff *skb, struct xt_match_param *par,
+             const struct xt_socket_mtinfo1 *info)
+{
+	struct sock *sk;
+    
+	sk = xt_socket_get4_sk(skb, par);
 	if (sk != NULL) {
 		bool wildcard;
 		bool transparent = true;
-
+        
 		/* Ignore sockets listening on INADDR_ANY */
 		wildcard = (sk->sk_state != TCP_TIME_WAIT &&
-			    inet_sk(sk)->rcv_saddr == 0);
-
+                    inet_sk(sk)->rcv_saddr == 0);
+        
 		/* Ignore non-transparent sockets,
-		   if XT_SOCKET_TRANSPARENT is used */
+         if XT_SOCKET_TRANSPARENT is used */
 		if (info && info->flags & XT_SOCKET_TRANSPARENT)
 			transparent = ((sk->sk_state != TCP_TIME_WAIT &&
-					inet_sk(sk)->transparent) ||
-				       (sk->sk_state == TCP_TIME_WAIT &&
-					inet_twsk(sk)->tw_transparent));
-
-		nf_tproxy_put_sock(sk);
-
+                            inet_sk(sk)->transparent) ||
+                           (sk->sk_state == TCP_TIME_WAIT &&
+                            inet_twsk(sk)->tw_transparent));
+        
+		xt_socket_put_sk(sk);
+        
 		if (wildcard || !transparent)
 			sk = NULL;
 	}
-
-	pr_debug("socket match: proto %u %08x:%u -> %08x:%u "
-		 "(orig %08x:%u) sock %p\n",
-		 protocol, ntohl(saddr), ntohs(sport),
-		 ntohl(daddr), ntohs(dport),
-		 ntohl(iph->daddr), hp ? ntohs(hp->dest) : 0, sk);
-
+    
 	return (sk != NULL);
 }
 
