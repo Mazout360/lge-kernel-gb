@@ -32,7 +32,6 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/mm.h>
-#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -253,7 +252,7 @@ static int __devinit hecubafb_probe(struct platform_device *dev)
 	par->send_command = apollo_send_command;
 	par->send_data = apollo_send_data;
 
-	info->flags = FBINFO_FLAG_DEFAULT;
+	info->flags = FBINFO_FLAG_DEFAULT | FBINFO_VIRTFB;
 
 	info->fbdefio = &hecubafb_defio;
 	fb_deferred_io_init(info);
@@ -300,7 +299,7 @@ static int __devexit hecubafb_remove(struct platform_device *dev)
 
 static struct platform_driver hecubafb_driver = {
 	.probe	= hecubafb_probe,
-	.remove = hecubafb_remove,
+	.remove = __devexit_p(hecubafb_remove),
 	.driver	= {
 		.owner	= THIS_MODULE,
 		.name	= "hecubafb",

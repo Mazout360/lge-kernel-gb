@@ -188,6 +188,11 @@ int fg_console;
 int last_console;
 int want_console = -1;
 int kmsg_redirect;
+static int saved_fg_console;
+static int saved_last_console;
+static int saved_want_console;
+static int saved_vc_mode;
+static int saved_console_blanked;
 
 /*
  * For each existing display, we have a pointer to console currently visible
@@ -3374,6 +3379,80 @@ int con_is_bound(const struct consw *csw)
 	return bound;
 }
 EXPORT_SYMBOL(con_is_bound);
+
+/**
+ * con_debug_enter - prepare the console for the kernel debugger
+ * @sw: console driver
+ *
+ * Called when the console is taken over by the kernel debugger, this
+ * function needs to save the current console state, then put the console
+ * into a state suitable for the kernel debugger.
+ *
+ * RETURNS:
+ * Zero on success, nonzero if a failure occurred when trying to prepare
+ * the console for the debugger.
+ */
+int con_debug_enter(struct vc_data *vc)
+{
+	int ret = 0;
+    
+	saved_fg_console = fg_console;
+	saved_last_console = last_console;
+	saved_want_console = want_console;
+	saved_vc_mode = vc->vc_mode;
+	saved_console_blanked = console_blanked;
+	vc->vc_mode = KD_TEXT;
+	console_blanked = 0;
+	if (vc->vc_sw->con_debug_enter)
+		ret = vc->vc_sw->con_debug_enter(vc);
+#ifdef CONFIG_KGDB_KDB
+	/* Set the initial LINES variable if it is not already set */
+	if (vc->vc_rows < 999) {
+		int linecount;
+		char lns[4];
+		const char *setargs[3] = {
+			"set",
+			"LINES",
+			lns,
+		};
+		if (kdbgetintenv(setargs[0], &linecount)) {
+			snprintf(lns, 4, "%i", vc->vc_rows);
+			kdb_set(2, setargs);
+		}
+	}
+#endif /* CONFIG_KGDB_KDB */
+	return ret;
+}
+EXPORT_SYMBOL_GPL(con_debug_enter);
+
+/**
+ * con_debug_leave - restore console state
+ * @sw: console driver
+ *
+ * Restore the console state to what it was before the kernel debugger
+ * was invoked.
+ *
+ * RETURNS:
+ * Zero on success, nonzero if a failure occurred when trying to restore
+ * the console.
+ */
+int con_debug_leave(void)
+{
+	struct vc_data *vc;
+	int ret = 0;
+    
+	fg_console = saved_fg_console;
+	last_console = saved_last_console;
+	want_console = saved_want_console;
+	console_blanked = saved_console_blanked;
+	vc_cons[fg_console].d->vc_mode = saved_vc_mode;
+    
+	vc = vc_cons[fg_console].d;
+	if (vc->vc_sw->con_debug_leave)
+		ret = vc->vc_sw->con_debug_leave(vc);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(con_debug_leave);
 
 /**
  * register_con_driver - register console driver to console layer

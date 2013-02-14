@@ -278,15 +278,30 @@ static int fbcon_get_rotate(struct fb_info *info)
 	return (ops) ? ops->rotate : 0;
 }
 
+/*
+                                                    
+ */
+#if defined (CONFIG_PANICRPT)     
+extern int panicrpt_ispanic (void);
+#endif /* CONFIG_PANICRPT */
 static inline int fbcon_is_inactive(struct vc_data *vc, struct fb_info *info)
 {
 	struct fbcon_ops *ops = info->fbcon_par;
 
+/*
+                                                    
+ */
+#if defined (CONFIG_PANICRPT)     
+    if (panicrpt_ispanic ()) {
+        return 0;
+    }
+#endif /* CONFIG_PANICRPT */
 	return (info->state != FBINFO_STATE_RUNNING ||
-		vc->vc_mode != KD_TEXT || ops->graphics);
+		vc->vc_mode != KD_TEXT || ops->graphics) &&
+		!vt_force_oops_output(vc);
 }
 
-static inline int get_color(struct vc_data *vc, struct fb_info *info,
+static int get_color(struct vc_data *vc, struct fb_info *info,
 	      u16 c, int is_fg)
 {
 	int depth = fb_get_color_depth(&info->var, &info->fix);
@@ -369,7 +384,6 @@ static void fb_flashcursor(struct work_struct *work)
 {
 	struct fb_info *info = container_of(work, struct fb_info, queue);
 	struct fbcon_ops *ops = info->fbcon_par;
-	struct display *p;
 	struct vc_data *vc = NULL;
 	int c;
 	int mode;
@@ -385,7 +399,6 @@ static void fb_flashcursor(struct work_struct *work)
 		return;
 	}
 
-	p = &fb_display[vc->vc_num];
 	c = scr_readw((u16 *) vc->vc_pos);
 	mode = (!ops->cursor_flash || ops->cursor_state.enable) ?
 		CM_ERASE : CM_DRAW;
@@ -822,10 +835,10 @@ static int set_con2fb_map(int unit, int newidx, int user)
 	if (oldidx == newidx)
 		return 0;
 
-	if (!info || fbcon_has_exited)
+	if (!info)
 		return -EINVAL;
 
- 	if (!err && !search_for_mapped_con()) {
+	if (!search_for_mapped_con() || !con_is_bound(&fb_con)) {
 		info_idx = newidx;
 		return fbcon_takeover(0);
 	}
@@ -1073,6 +1086,7 @@ static void fbcon_init(struct vc_data *vc, int init)
 	if (p->userfont)
 		charcnt = FNTCHARCNT(p->fontdata);
 
+	vc->vc_panic_force_write = !!(info->flags & FBINFO_CAN_FORCE_OUTPUT);
 	vc->vc_can_do_color = (fb_get_color_depth(&info->var, &info->fix)!=1);
 	vc->vc_complement_mask = vc->vc_can_do_color ? 0x7700 : 0x0800;
 	if (charcnt == 256) {
@@ -1195,6 +1209,38 @@ finished:
 
 	return;
 }
+
+/*
+                                                          
+ */
+#if defined(CONFIG_PANICRPT)     
+void fbcon_putcs_panicerr (struct vc_data *vc, const unsigned short *s,
+			int count, int ypos, int xpos)
+{
+    struct fb_info *info;
+    struct display *p;
+    struct fbcon_ops *ops;
+
+    info = registered_fb[con2fb_map[vc->vc_num]];
+    p    = &fb_display[vc->vc_num];
+    ops  = info->fbcon_par;
+    ops->putcs(vc, info, s, count, real_y(p, ypos), xpos, 2, 0);
+}
+
+void fbcon_update_panicerr (struct vc_data *vc)
+{
+    struct fb_info *info;
+    struct fbcon_ops *ops;
+
+    info = registered_fb[con2fb_map[vc->vc_num]];
+    ops  = info->fbcon_par;
+
+    ops->update_start(info);
+}
+#endif /* CONFIG_PANICRPT */
+/*
+                                                        
+ */
 
 /* ====================================================================== */
 
@@ -2342,6 +2388,30 @@ static int fbcon_blank(struct vc_data *vc, int blank, int mode_switch)
 	return 0;
 }
 
+static int fbcon_debug_enter(struct vc_data *vc)
+{
+	struct fb_info *info = registered_fb[con2fb_map[vc->vc_num]];
+	struct fbcon_ops *ops = info->fbcon_par;
+
+	ops->save_graphics = ops->graphics;
+	ops->graphics = 0;
+	if (info->fbops->fb_debug_enter)
+		info->fbops->fb_debug_enter(info);
+	fbcon_set_palette(vc, color_table);
+	return 0;
+}
+
+static int fbcon_debug_leave(struct vc_data *vc)
+{
+	struct fb_info *info = registered_fb[con2fb_map[vc->vc_num]];
+	struct fbcon_ops *ops = info->fbcon_par;
+
+	ops->graphics = ops->save_graphics;
+	if (info->fbops->fb_debug_leave)
+		info->fbops->fb_debug_leave(info);
+	return 0;
+}
+
 static int fbcon_get_font(struct vc_data *vc, struct console_font *font)
 {
 	u8 *fontdata = vc->vc_font.data;
@@ -3025,6 +3095,20 @@ static int fbcon_fb_unregistered(struct fb_info *info)
 	return 0;
 }
 
+static void fbcon_remap_all(int idx)
+{
+	int i;
+	for (i = first_fb_vc; i <= last_fb_vc; i++)
+		set_con2fb_map(i, idx, 0);
+
+	if (con_is_bound(&fb_con)) {
+		printk(KERN_INFO "fbcon: Remapping primary device, "
+		       "fb%i, to tty %i-%i\n", idx,
+		       first_fb_vc + 1, last_fb_vc + 1);
+		info_idx = idx;
+	}
+}
+
 #ifdef CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY
 static void fbcon_select_primary(struct fb_info *info)
 {
@@ -3225,6 +3309,10 @@ static int fbcon_event_notify(struct notifier_block *self,
 		caps = event->data;
 		fbcon_get_requirement(info, caps);
 		break;
+	case FB_EVENT_REMAP_ALL_CONSOLE:
+		idx = info->node;
+		fbcon_remap_all(idx);
+		break;
 	}
 done:
 	return ret;
@@ -3258,6 +3346,8 @@ static const struct consw fb_con = {
 	.con_screen_pos 	= fbcon_screen_pos,
 	.con_getxy 		= fbcon_getxy,
 	.con_resize             = fbcon_resize,
+	.con_debug_enter	= fbcon_debug_enter,
+	.con_debug_leave	= fbcon_debug_leave,
 };
 
 static struct notifier_block fbcon_event_notifier = {
@@ -3462,7 +3552,7 @@ static void fbcon_exit(void)
 	softback_buf = 0UL;
 
 	for (i = 0; i < FB_MAX; i++) {
-		int pending;
+		int pending = 0;
 
 		mapped = 0;
 		info = registered_fb[i];
@@ -3470,7 +3560,8 @@ static void fbcon_exit(void)
 		if (info == NULL)
 			continue;
 
-		pending = cancel_work_sync(&info->queue);
+		if (info->queue.func)
+			pending = cancel_work_sync(&info->queue);
 		DPRINTK("fbcon: %s pending work\n", (pending ? "canceled" :
 			"no"));
 
