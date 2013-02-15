@@ -276,8 +276,6 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err = 0;
 	int skb_len;
-    unsigned long flags;
-    struct sk_buff_head *list = &sk->sk_receive_queue;
 
 	/* Cast sk->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK
@@ -307,10 +305,7 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	skb_len = skb->len;
 
-	spin_lock_irqsave(&list->lock, flags);
-    skb->dropcount = atomic_read(&sk->sk_drops);
-    __skb_queue_tail(list, skb);
-    spin_unlock_irqrestore(&list->lock, flags);
+	skb_queue_tail(&sk->sk_receive_queue, skb);
 
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_data_ready(sk, skb_len);
@@ -707,12 +702,6 @@ set_rcvbuf:
 
 		/* We implement the SO_SNDLOWAT etc to
 		   not be settable (1003.1g 5.3) */
-    case SO_RXQ_OVFL:
-        if (valbool)
-            sock_set_flag(sk, SOCK_RXQ_OVFL);
-        else
-            sock_reset_flag(sk, SOCK_RXQ_OVFL);
-        break;
 	default:
 		ret = -ENOPROTOOPT;
 		break;
@@ -912,10 +901,6 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 		v.val = sk->sk_mark;
 		break;
 
-    case SO_RXQ_OVFL:
-        v.val = !!sock_flag(sk, SOCK_RXQ_OVFL);
-        break;
-            
 	default:
 		return -ENOPROTOOPT;
 	}
@@ -1407,11 +1392,6 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 	gfp_t gfp_mask;
 	long timeo;
 	int err;
-	int npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-
-	err = -EMSGSIZE;
-	if (npages > MAX_SKB_FRAGS)
-		goto failure;
 
 	gfp_mask = sk->sk_allocation;
 	if (gfp_mask & __GFP_WAIT)
@@ -1430,12 +1410,14 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {
 			skb = alloc_skb(header_len, gfp_mask);
 			if (skb) {
+				int npages;
 				int i;
 
 				/* No pages, we're done... */
 				if (!data_len)
 					break;
 
+				npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
 				skb->truesize += data_len;
 				skb_shinfo(skb)->nr_frags = npages;
 				for (i = 0; i < npages; i++) {

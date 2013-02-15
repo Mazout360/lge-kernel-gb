@@ -129,8 +129,8 @@ static void svc_xprt_free(struct kref *kref)
 	struct svc_xprt *xprt =
 		container_of(kref, struct svc_xprt, xpt_ref);
 	struct module *owner = xprt->xpt_class->xcl_owner;
-	if (test_bit(XPT_CACHE_AUTH, &xprt->xpt_flags)
-	    && xprt->xpt_auth_cache != NULL)
+	if (test_bit(XPT_CACHE_AUTH, &xprt->xpt_flags) &&
+	    xprt->xpt_auth_cache != NULL)
 		svcauth_unix_info_release(xprt->xpt_auth_cache);
 	xprt->xpt_ops->xpo_free(xprt);
 	module_put(owner);
@@ -304,6 +304,7 @@ static void svc_thread_dequeue(struct svc_pool *pool, struct svc_rqst *rqstp)
  */
 void svc_xprt_enqueue(struct svc_xprt *xprt)
 {
+	struct svc_serv	*serv = xprt->xpt_server;
 	struct svc_pool *pool;
 	struct svc_rqst	*rqstp;
 	int cpu;
@@ -380,6 +381,8 @@ void svc_xprt_enqueue(struct svc_xprt *xprt)
 				rqstp, rqstp->rq_xprt);
 		rqstp->rq_xprt = xprt;
 		svc_xprt_get(xprt);
+		rqstp->rq_reserved = serv->sv_max_mesg;
+		atomic_add(rqstp->rq_reserved, &xprt->xpt_reserved);
 		rqstp->rq_waking = 1;
 		pool->sp_nwaking++;
 		pool->sp_stats.threads_woken++;
@@ -664,6 +667,8 @@ int svc_recv(struct svc_rqst *rqstp, long timeout)
 	if (xprt) {
 		rqstp->rq_xprt = xprt;
 		svc_xprt_get(xprt);
+		rqstp->rq_reserved = serv->sv_max_mesg;
+		atomic_add(rqstp->rq_reserved, &xprt->xpt_reserved);
 	} else {
 		/* No data pending. Go to sleep */
 		svc_thread_enqueue(pool, rqstp);
@@ -753,8 +758,6 @@ int svc_recv(struct svc_rqst *rqstp, long timeout)
 		} else
 			len = xprt->xpt_ops->xpo_recvfrom(rqstp);
 		dprintk("svc: got len=%d\n", len);
-		rqstp->rq_reserved = serv->sv_max_mesg;
-		atomic_add(rqstp->rq_reserved, &xprt->xpt_reserved);
 	}
 
 	/* No data, incomplete (TCP) read, or accept() */
@@ -808,8 +811,7 @@ int svc_send(struct svc_rqst *rqstp)
 
 	/* Grab mutex to serialize outgoing data. */
 	mutex_lock(&xprt->xpt_mutex);
-	if (test_bit(XPT_DEAD, &xprt->xpt_flags)
-			|| test_bit(XPT_CLOSE, &xprt->xpt_flags))
+	if (test_bit(XPT_DEAD, &xprt->xpt_flags))
 		len = -ENOTCONN;
 	else
 		len = xprt->xpt_ops->xpo_sendto(rqstp);
@@ -849,8 +851,8 @@ static void svc_age_temp_xprts(unsigned long closure)
 		 * through, close it. */
 		if (!test_and_set_bit(XPT_OLD, &xprt->xpt_flags))
 			continue;
-		if (atomic_read(&xprt->xpt_ref.refcount) > 1
-		    || test_bit(XPT_BUSY, &xprt->xpt_flags))
+		if (atomic_read(&xprt->xpt_ref.refcount) > 1 ||
+		    test_bit(XPT_BUSY, &xprt->xpt_flags))
 			continue;
 		svc_xprt_get(xprt);
 		list_move(le, &to_be_aged);

@@ -183,11 +183,12 @@ static struct sock *__udp6_lib_lookup_skb(struct sk_buff *skb,
 }
 
 struct sock *udp6_lib_lookup(struct net *net, const struct in6_addr *saddr, __be16 sport,
-                             const struct in6_addr *daddr, __be16 dport, int dif)
+			     const struct in6_addr *daddr, __be16 dport, int dif)
 {
-    return __udp6_lib_lookup(net, saddr, sport, daddr, dport, dif, &udp_table);
+	return __udp6_lib_lookup(net, saddr, sport, daddr, dport, dif, &udp_table);
 }
 EXPORT_SYMBOL_GPL(udp6_lib_lookup);
+
 
 /*
  * 	This should be easy, if there is something there we
@@ -259,7 +260,7 @@ try_again:
 					UDP_MIB_INDATAGRAMS, is_udplite);
 	}
 
-	sock_recv_ts_and_drops(msg, sk, skb);
+	sock_recv_timestamp(msg, sk, skb);
 
 	/* Copy the address. */
 	if (msg->msg_name) {

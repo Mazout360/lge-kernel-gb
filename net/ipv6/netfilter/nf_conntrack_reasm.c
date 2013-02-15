@@ -672,21 +672,22 @@ int nf_ct_frag6_init(void)
 	nf_init_frags.low_thresh = 192 * 1024;
 	inet_frags_init_net(&nf_init_frags);
 	inet_frags_init(&nf_frags);
-    
-    nf_ct_frag6_sysctl_header = register_sysctl_paths(nf_net_netfilter_sysctl_path,
-                                                      nf_ct_frag6_sysctl_table);
-    if (!nf_ct_frag6_sysctl_header) {
-        inet_frags_fini(&nf_frags);
-        return -ENOMEM;
-    }
+
+	nf_ct_frag6_sysctl_header = register_sysctl_paths(nf_net_netfilter_sysctl_path,
+							  nf_ct_frag6_sysctl_table);
+	if (!nf_ct_frag6_sysctl_header) {
+		inet_frags_fini(&nf_frags);
+		return -ENOMEM;
+	}
 
 	return 0;
 }
 
 void nf_ct_frag6_cleanup(void)
 {
-    unregister_sysctl_table(nf_ct_frag6_sysctl_header);
-    nf_ct_frag6_sysctl_header = NULL;
+	unregister_sysctl_table(nf_ct_frag6_sysctl_header);
+	nf_ct_frag6_sysctl_header = NULL;
+
 	inet_frags_fini(&nf_frags);
 
 	nf_init_frags.low_thresh = 0;

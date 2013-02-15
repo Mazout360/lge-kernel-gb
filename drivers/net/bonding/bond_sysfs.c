@@ -46,9 +46,7 @@
  * "show" function for the bond_masters attribute.
  * The class parameter is ignored.
  */
-static ssize_t bonding_show_bonds(struct class *cls,
-                                  struct class_attribute *attr,
-                                  char *buf)
+static ssize_t bonding_show_bonds(struct class *cls, char *buf)
 {
 	int res = 0;
 	struct bonding *bond;
@@ -92,7 +90,6 @@ static struct net_device *bond_get_by_name(const char *ifname)
  */
 
 static ssize_t bonding_store_bonds(struct class *cls,
-                                   struct class_attribute *attr,
 				   const char *buffer, size_t count)
 {
 	char command[IFNAMSIZ + 1] = {0, };

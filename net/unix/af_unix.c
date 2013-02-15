@@ -623,7 +623,7 @@ out:
 	return sk;
 }
 
-static int unix_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int unix_create(struct net *net, struct socket *sock, int protocol)
 {
 	if (protocol && protocol != PF_UNIX)
 		return -EPROTONOSUPPORT;
@@ -1043,8 +1043,8 @@ static int unix_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 		goto out;
 	addr_len = err;
 
-	if (test_bit(SOCK_PASSCRED, &sock->flags)
-		&& !u->addr && (err = unix_autobind(sock)) != 0)
+	if (test_bit(SOCK_PASSCRED, &sock->flags) && !u->addr &&
+	    (err = unix_autobind(sock)) != 0)
 		goto out;
 
 	timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
@@ -1407,8 +1407,8 @@ static int unix_dgram_sendmsg(struct kiocb *kiocb, struct socket *sock,
 			goto out;
 	}
 
-	if (test_bit(SOCK_PASSCRED, &sock->flags)
-		&& !u->addr && (err = unix_autobind(sock)) != 0)
+	if (test_bit(SOCK_PASSCRED, &sock->flags) && !u->addr
+	    && (err = unix_autobind(sock)) != 0)
 		goto out;
 
 	err = -EMSGSIZE;

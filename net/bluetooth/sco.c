@@ -434,7 +434,7 @@ static struct sock *sco_sock_alloc(struct net *net, struct socket *sock, int pro
 	return sk;
 }
 
-static int sco_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int sco_sock_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct sock *sk;
 
@@ -971,9 +971,7 @@ drop:
 	return 0;
 }
 
-static ssize_t sco_sysfs_show(struct class *dev,
-                              struct class_attribute *attr,
-                              char *buf)
+static ssize_t sco_sysfs_show(struct class *dev, char *buf)
 {
 	struct sock *sk;
 	struct hlist_node *node;

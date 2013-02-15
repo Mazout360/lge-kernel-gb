@@ -276,7 +276,7 @@ static inline int inet_netns_ok(struct net *net, int protocol)
  *	Create an inet socket.
  */
 
-static int inet_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int inet_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct inet_protosw *answer;

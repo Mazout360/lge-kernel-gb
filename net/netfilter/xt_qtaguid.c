@@ -1486,7 +1486,7 @@ err:
 }
 
 static struct sock *qtaguid_find_sk(const struct sk_buff *skb,
-				    struct xt_match_param *par)
+				    struct xt_action_param *par)
 {
 	struct sock *sk;
 	unsigned int hook_mask = (1 << par->hooknum);
@@ -1532,7 +1532,7 @@ static struct sock *qtaguid_find_sk(const struct sk_buff *skb,
 
 static void account_for_uid(const struct sk_buff *skb,
 			    const struct sock *alternate_sk, uid_t uid,
-			    struct xt_match_param *par)
+			    struct xt_action_param *par)
 {
 	const struct net_device *el_dev;
 
@@ -1568,7 +1568,7 @@ static void account_for_uid(const struct sk_buff *skb,
 	}
 }
 
-static bool qtaguid_mt(const struct sk_buff *skb, struct xt_match_param *par)
+static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
 	const struct xt_qtaguid_match_info *info = par->matchinfo;
 	const struct file *filp;

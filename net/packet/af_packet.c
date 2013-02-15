@@ -627,14 +627,15 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	po->stats.tp_packets++;
-    skb->dropcount = atomic_read(&sk->sk_drops);
 	__skb_queue_tail(&sk->sk_receive_queue, skb);
 	spin_unlock(&sk->sk_receive_queue.lock);
 	sk->sk_data_ready(sk, skb->len);
 	return 0;
 
 drop_n_acct:
-	po->stats.tp_drops = atomic_inc_return(&sk->sk_drops);
+	spin_lock(&sk->sk_receive_queue.lock);
+	po->stats.tp_drops++;
+	spin_unlock(&sk->sk_receive_queue.lock);
 
 drop_n_restore:
 	if (skb_head != skb->data && skb_shared(skb)) {
@@ -1045,9 +1046,10 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 		}
 		packet_increment_head(&po->tx_ring);
 		len_sum += tp_len;
-	} while (likely((ph != NULL) || ((!(msg->msg_flags & MSG_DONTWAIT))
-					&& (atomic_read(&po->tx_ring.pending))))
-	      );
+	} while (likely((ph != NULL) ||
+			((!(msg->msg_flags & MSG_DONTWAIT)) &&
+			 (atomic_read(&po->tx_ring.pending))))
+		);
 
 	err = len_sum;
 	goto out_put;
@@ -1351,7 +1353,7 @@ static struct proto packet_proto = {
  *	Create a packet of type SOCK_PACKET.
  */
 
-static int packet_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int packet_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct packet_sock *po;
@@ -1482,7 +1484,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		goto out_free;
 
-	sock_recv_ts_and_drops(msg, sk, skb);
+	sock_recv_timestamp(msg, sk, skb);
 
 	if (msg->msg_name)
 		memcpy(msg->msg_name, &PACKET_SKB_CB(skb)->sa,

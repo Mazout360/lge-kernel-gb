@@ -665,6 +665,7 @@ ixgb_setup_tx_resources(struct ixgb_adapter *adapter)
 		 "Unable to allocate transmit descriptor ring memory\n");
 		return -ENOMEM;
 	}
+	memset(txdr->buffer_info, 0, size);
 
 	/* round up to nearest 4K */
 

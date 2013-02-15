@@ -356,7 +356,11 @@ static int ram_console_driver_probe(struct platform_device *pdev)
 #else
        #define RAM_RESERVED_SIZE 100*1024
 #endif
+#ifdef CONFIG_HACKFEST
+       reserved_start = start+ buffer_size - (32*SZ_1M);
+#else
        reserved_start = start+ buffer_size;
+#endif
        reserved_buffer = ioremap(reserved_start, RAM_RESERVED_SIZE);
        //memset(reserved_buffer, 0x00, 100*1024);
        printk ("ram console : ram_console virtual addr = 0x%x \n", buffer);

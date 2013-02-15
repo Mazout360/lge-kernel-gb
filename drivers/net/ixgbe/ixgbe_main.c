@@ -4035,6 +4035,7 @@ int ixgbe_setup_tx_resources(struct ixgbe_adapter *adapter,
 	tx_ring->tx_buffer_info = vmalloc(size);
 	if (!tx_ring->tx_buffer_info)
 		goto err;
+	memset(tx_ring->tx_buffer_info, 0, size);
 
 	/* round up to nearest 4K */
 	tx_ring->size = tx_ring->count * sizeof(union ixgbe_adv_tx_desc);
@@ -4103,6 +4104,7 @@ int ixgbe_setup_rx_resources(struct ixgbe_adapter *adapter,
 		        "vmalloc allocation failed for the rx desc ring\n");
 		goto alloc_failed;
 	}
+	memset(rx_ring->rx_buffer_info, 0, size);
 
 	/* Round up to nearest 4K */
 	rx_ring->size = rx_ring->count * sizeof(union ixgbe_adv_rx_desc);

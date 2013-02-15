@@ -1142,14 +1142,8 @@ out_free:
 	SCTP_DEBUG_PRINTK("About to exit __sctp_connect() free asoc: %p"
 			  " kaddrs: %p err: %d\n",
 			  asoc, kaddrs, err);
-	if (asoc) {
-		/* sctp_primitive_ASSOCIATE may have added this association
-		 * To the hash table, try to unhash it, just in case, its a noop
-		 * if it wasn't hashed so we're safe
-		 */
-		sctp_unhash_established(asoc);
+	if (asoc)
 		sctp_association_free(asoc);
-	}
 	return err;
 }
 
@@ -1857,10 +1851,8 @@ SCTP_STATIC int sctp_sendmsg(struct kiocb *iocb, struct sock *sk,
 	goto out_unlock;
 
 out_free:
-	if (new_asoc) {
-		sctp_unhash_established(asoc);
+	if (new_asoc)
 		sctp_association_free(asoc);
-	}
 out_unlock:
 	sctp_release_sock(sk);
 
@@ -1976,7 +1968,7 @@ SCTP_STATIC int sctp_recvmsg(struct kiocb *iocb, struct sock *sk,
 	if (err)
 		goto out_free;
 
-	sock_recv_ts_and_drops(msg, sk, skb);
+	sock_recv_timestamp(msg, sk, skb);
 	if (sctp_ulpevent_is_notification(event)) {
 		msg->msg_flags |= MSG_NOTIFICATION;
 		sp->pf->event_msgname(event, msg->msg_name, addr_len);
@@ -2362,8 +2354,8 @@ static int sctp_setsockopt_peer_addr_params(struct sock *sk,
 	    pmtud_change     == SPP_PMTUD ||
 	    sackdelay_change == SPP_SACKDELAY ||
 	    params.spp_sackdelay > 500 ||
-	    (params.spp_pathmtu
-	    && params.spp_pathmtu < SCTP_DEFAULT_MINSEGMENT))
+	    (params.spp_pathmtu &&
+	     params.spp_pathmtu < SCTP_DEFAULT_MINSEGMENT))
 		return -EINVAL;
 
 	/* If an address other than INADDR_ANY is specified, and

@@ -184,7 +184,7 @@ static void reject_rx_queue(struct sock *sk)
  * Returns 0 on success, errno otherwise
  */
 
-static int tipc_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int tipc_create(struct net *net, struct socket *sock, int protocol)
 {
 	const struct proto_ops *ops;
 	socket_state state;
@@ -1135,13 +1135,11 @@ restart:
 
 	/* Loop around if more data is required */
 
-	if ((sz_copied < buf_len)    /* didn't get all requested data */
-	    && (!skb_queue_empty(&sk->sk_receive_queue) ||
-		(flags & MSG_WAITALL))
-				     /* ... and more is ready or required */
-	    && (!(flags & MSG_PEEK)) /* ... and aren't just peeking at data */
-	    && (!err)                /* ... and haven't reached a FIN */
-	    )
+	if ((sz_copied < buf_len) &&	/* didn't get all requested data */
+	    (!skb_queue_empty(&sk->sk_receive_queue) ||
+	     (flags & MSG_WAITALL)) &&	/* and more is ready or required */
+	    (!(flags & MSG_PEEK)) &&	/* and aren't just peeking at data */
+	    (!err))			/* and haven't reached a FIN */
 		goto restart;
 
 exit:
@@ -1529,7 +1527,7 @@ static int accept(struct socket *sock, struct socket *new_sock, int flags)
 
 	buf = skb_peek(&sk->sk_receive_queue);
 
-	res = tipc_create(sock_net(sock->sk), new_sock, 0, 0);
+	res = tipc_create(sock_net(sock->sk), new_sock, 0);
 	if (!res) {
 		struct sock *new_sk = new_sock->sk;
 		struct tipc_sock *new_tsock = tipc_sk(new_sk);
