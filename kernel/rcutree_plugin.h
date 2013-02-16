@@ -259,7 +259,7 @@ static void rcu_read_unlock_special(struct task_struct *t)
 			rnp_p = rnp->parent;
 			spin_lock_irqsave(&rnp_p->lock, flags);
 			WARN_ON_ONCE(rnp->qsmask);
-			cpu_quiet_msk(mask, &rcu_preempt_state, rnp_p, flags);
+			rcu_report_qs_rsp(mask, &rcu_preempt_state, rnp_p, flags);
 			return;
 		}
     else
