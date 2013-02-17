@@ -31,8 +31,6 @@
 #include <linux/falloc.h>
 #include <linux/fs_struct.h>
 
-#include "internal.h"
-
 int vfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	int retval = -ENODEV;

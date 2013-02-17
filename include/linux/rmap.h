@@ -26,9 +26,6 @@
  */
 struct anon_vma {
 	spinlock_t lock;	/* Serialize access to vma list */
-#ifdef CONFIG_KSM
-    atomic_t ksm_refcount;
-#endif
 	/*
 	 * NOTE: the LSB of the head.next is set by
 	 * mm_take_all_locks() _after_ taking the above lock. So the
@@ -41,27 +38,6 @@ struct anon_vma {
 };
 
 #ifdef CONFIG_MMU
-#ifdef CONFIG_KSM
-static inline void ksm_refcount_init(struct anon_vma *anon_vma)
-{
-	atomic_set(&anon_vma->ksm_refcount, 0);
-}
-
-static inline int ksm_refcount(struct anon_vma *anon_vma)
-{
-	return atomic_read(&anon_vma->ksm_refcount);
-}
-#else
-static inline void ksm_refcount_init(struct anon_vma *anon_vma)
-{
-}
-
-static inline int ksm_refcount(struct anon_vma *anon_vma)
-{
-	return 0;
-}
-#endif /* CONFIG_KSM */
-
 static inline struct anon_vma *page_anon_vma(struct page *page)
 {
     if (((unsigned long)page->mapping & PAGE_MAPPING_FLAGS) !=
@@ -94,7 +70,6 @@ void __anon_vma_merge(struct vm_area_struct *, struct vm_area_struct *);
 void anon_vma_unlink(struct vm_area_struct *);
 void anon_vma_link(struct vm_area_struct *);
 void __anon_vma_link(struct vm_area_struct *);
-void anon_vma_free(struct anon_vma *);
 
 /*
  * rmap interfaces called when adding or removing pte of page
@@ -162,12 +137,6 @@ int try_to_munlock(struct page *);
 struct anon_vma *page_lock_anon_vma(struct page *page);
 void page_unlock_anon_vma(struct anon_vma *anon_vma);
 int page_mapped_in_vma(struct page *page, struct vm_area_struct *vma);
-
-/*
- * Called by migrate.c to remove migration ptes, but might be used more later.
- */
-int rmap_walk(struct page *page, int (*rmap_one)(struct page *,
-                            struct vm_area_struct *, unsigned long, void *), void *arg);
 
 #else	/* !CONFIG_MMU */
 

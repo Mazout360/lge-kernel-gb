@@ -880,8 +880,8 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 	if (err)
 		goto out_unlock;
 
-	path = shp->shm_file->f_path;
-    path_get(&path);
+	path.dentry = dget(shp->shm_file->f_path.dentry);
+	path.mnt    = shp->shm_file->f_path.mnt;
 	shp->shm_nattch++;
 	size = i_size_read(path.dentry->d_inode);
 	shm_unlock(shp);
@@ -891,8 +891,8 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 	if (!sfd)
 		goto out_put_dentry;
 
-	file = alloc_file(&path, f_mode,
-                      is_file_hugepages(shp->shm_file) ?
+	file = alloc_file(path.mnt, path.dentry, f_mode,
+			is_file_hugepages(shp->shm_file) ?
 				&shm_file_operations_huge :
 				&shm_file_operations);
 	if (!file)
@@ -952,7 +952,7 @@ out_unlock:
 out_free:
 	kfree(sfd);
 out_put_dentry:
-	path_put(&path);
+	dput(path.dentry);
 	goto out_nattch;
 }
 

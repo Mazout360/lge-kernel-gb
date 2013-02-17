@@ -18,9 +18,6 @@ static int hwpoison_inject(void *data, u64 val)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
     
-    if (!hwpoison_filter_enable)
-        goto inject;
-    
 	if (!pfn_valid(pfn))
 		return -ENXIO;
     
@@ -51,7 +48,6 @@ static int hwpoison_inject(void *data, u64 val)
 	if (err)
 		return 0;
     
-inject:
 	printk(KERN_INFO "Injecting memory failure at pfn %lx\n", pfn);
 	return __memory_failure(pfn, 18, MF_COUNT_INCREASED);
 }

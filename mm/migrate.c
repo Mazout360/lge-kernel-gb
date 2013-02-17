@@ -21,7 +21,6 @@
 #include <linux/mm_inline.h>
 #include <linux/nsproxy.h>
 #include <linux/pagevec.h>
-#include <linux/ksm.h>
 #include <linux/rmap.h>
 #include <linux/topology.h>
 #include <linux/cpu.h>
@@ -88,8 +87,8 @@ int putback_lru_pages(struct list_head *l)
 /*
  * Restore a potential migration pte to a working pte entry
  */
-static int remove_migration_pte(struct page *new, struct vm_area_struct *vma,
-                               unsigned long addr, void *old)
+static void remove_migration_pte(struct vm_area_struct *vma,
+		struct page *old, struct page *new)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	swp_entry_t entry;
@@ -98,37 +97,40 @@ static int remove_migration_pte(struct page *new, struct vm_area_struct *vma,
  	pmd_t *pmd;
 	pte_t *ptep, pte;
  	spinlock_t *ptl;
+	unsigned long addr = page_address_in_vma(new, vma);
+
+	if (addr == -EFAULT)
+		return;
 
  	pgd = pgd_offset(mm, addr);
 	if (!pgd_present(*pgd))
-                goto out;
+                return;
 
 	pud = pud_offset(pgd, addr);
 	if (!pud_present(*pud))
-                goto out;
+                return;
 
 	pmd = pmd_offset(pud, addr);
 	if (!pmd_present(*pmd))
-		goto out;
+		return;
 
 	ptep = pte_offset_map(pmd, addr);
 
 	if (!is_swap_pte(*ptep)) {
 		pte_unmap(ptep);
- 		goto out;
+ 		return;
  	}
 
  	ptl = pte_lockptr(mm, pmd);
  	spin_lock(ptl);
 	pte = *ptep;
 	if (!is_swap_pte(pte))
-		goto unlock;
+		goto out;
 
 	entry = pte_to_swp_entry(pte);
 
-	if (!is_migration_entry(entry) ||
-        migration_entry_to_page(entry) != old)
-        goto unlock;
+	if (!is_migration_entry(entry) || migration_entry_to_page(entry) != old)
+		goto out;
 
 	get_page(new);
 	pte = pte_mkold(mk_pte(new, vma->vm_page_prot));
@@ -145,11 +147,52 @@ static int remove_migration_pte(struct page *new, struct vm_area_struct *vma,
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, addr, pte);
 
-unlock:
-	pte_unmap_unlock(ptep, ptl);
-    
 out:
-    return SWAP_AGAIN;
+	pte_unmap_unlock(ptep, ptl);
+}
+
+/*
+ * Note that remove_file_migration_ptes will only work on regular mappings,
+ * Nonlinear mappings do not use migration entries.
+ */
+static void remove_file_migration_ptes(struct page *old, struct page *new)
+{
+	struct vm_area_struct *vma;
+	struct address_space *mapping = new->mapping;
+	struct prio_tree_iter iter;
+	pgoff_t pgoff = new->index << (PAGE_CACHE_SHIFT - PAGE_SHIFT);
+
+	if (!mapping)
+		return;
+
+	spin_lock(&mapping->i_mmap_lock);
+
+	vma_prio_tree_foreach(vma, &iter, &mapping->i_mmap, pgoff, pgoff)
+		remove_migration_pte(vma, old, new);
+
+	spin_unlock(&mapping->i_mmap_lock);
+}
+
+/*
+ * Must hold mmap_sem lock on at least one of the vmas containing
+ * the page so that the anon_vma cannot vanish.
+ */
+static void remove_anon_migration_ptes(struct page *old, struct page *new)
+{
+	struct anon_vma *anon_vma;
+	struct vm_area_struct *vma;
+
+	/*
+	 * We hold the mmap_sem lock. So no need to call page_lock_anon_vma.
+	 */
+    anon_vma = page_anon_vma(new);
+    if (!anon_vma)
+        return;	spin_lock(&anon_vma->lock);
+
+	list_for_each_entry(vma, &anon_vma->head, anon_vma_node)
+		remove_migration_pte(vma, old, new);
+
+	spin_unlock(&anon_vma->lock);
 }
 
 /*
@@ -158,7 +201,10 @@ out:
  */
 static void remove_migration_ptes(struct page *old, struct page *new)
 {
-	rmap_walk(new, remove_migration_pte, old);
+	if (PageAnon(new))
+		remove_anon_migration_ptes(old, new);
+	else
+		remove_file_migration_ptes(old, new);
 }
 
 /*
@@ -319,7 +365,6 @@ static void migrate_page_copy(struct page *newpage, struct page *page)
  	}
 
 	mlock_migrate_page(newpage, page);
-    ksm_migrate_page(newpage, page);
 
 	ClearPageSwapCache(page);
 	ClearPagePrivate(page);
@@ -539,9 +584,9 @@ static int move_to_new_page(struct page *newpage, struct page *page)
 	else
 		rc = fallback_migrate_page(mapping, newpage, page);
 
-	if (!rc)
+	if (!rc) {
 		remove_migration_ptes(page, newpage);
-	else
+	} else
 		newpage->mapping = NULL;
 
 	unlock_page(newpage);
@@ -554,7 +599,7 @@ static int move_to_new_page(struct page *newpage, struct page *page)
  * to the newly allocated page in newpage.
  */
 static int unmap_and_move(new_page_t get_new_page, unsigned long private,
-			struct page *page, int force, int offlining)
+			struct page *page, int force)
 {
 	int rc = 0;
 	int *result = NULL;
@@ -580,20 +625,6 @@ static int unmap_and_move(new_page_t get_new_page, unsigned long private,
 		lock_page(page);
 	}
 
-    /*
- 	 * Only memory hotplug's offline_pages() caller has locked out KSM,
- 	 * and can safely migrate a KSM page.  The other cases have skipped
- 	 * PageKsm along with PageReserved - but it is only now when we have
- 	 * the page lock that we can be certain it will not go KSM beneath us
- 	 * (KSM will not upgrade a page from PageAnon to PageKsm when it sees
- 	 * its pagecount raised, but only here do we take the page lock which
- 	 * serializes that).
- 	 */
-    if (PageKsm(page) && !offlining) {
-        rc = -EBUSY;
-        goto unlock;
-    }
-    
 	/* charge against new page */
 	charge = mem_cgroup_prepare_migration(page, &mem);
 	if (charge == -ENOMEM) {
@@ -710,7 +741,7 @@ move_newpage:
  * Return: Number of pages not migrated or error code.
  */
 int migrate_pages(struct list_head *from,
-		new_page_t get_new_page, unsigned long private, int offlining)
+		new_page_t get_new_page, unsigned long private)
 {
 	int retry = 1;
 	int nr_failed = 0;
@@ -737,7 +768,7 @@ int migrate_pages(struct list_head *from,
 			cond_resched();
 
 			rc = unmap_and_move(get_new_page, private,
-						page, pass > 2, offlining);
+						page, pass > 2);
 
 			switch(rc) {
 			case -ENOMEM:
@@ -833,8 +864,7 @@ static int do_move_page_to_node_array(struct mm_struct *mm,
 		if (!page)
 			goto set_status;
 
-		/* Use PageReserved to check for zero page */
-        if (PageReserved(page) || PageKsm(page))
+		if (PageReserved(page))		/* Check for zero page */
 			goto put_and_set;
 
 		pp->page = page;
@@ -868,7 +898,7 @@ set_status:
 	err = 0;
 	if (!list_empty(&pagelist))
 		err = migrate_pages(&pagelist, new_page_node,
-				(unsigned long)pm, 0);
+				(unsigned long)pm);
 
 	up_read(&mm->mmap_sem);
 	return err;
@@ -992,7 +1022,7 @@ static void do_pages_stat_array(struct mm_struct *mm, unsigned long nr_pages,
 
 		err = -ENOENT;
 		/* Use PageReserved to check for zero page */
-		if (!page || PageReserved(page) || PageKsm(page))
+		if (!page || PageReserved(page))
 			goto set_status;
 
 		err = page_to_nid(page);
@@ -1017,26 +1047,33 @@ static int do_pages_stat(struct mm_struct *mm, unsigned long nr_pages,
 #define DO_PAGES_STAT_CHUNK_NR 16
 	const void __user *chunk_pages[DO_PAGES_STAT_CHUNK_NR];
 	int chunk_status[DO_PAGES_STAT_CHUNK_NR];
-	while (nr_pages) {
-        unsigned long chunk_nr;
+	unsigned long i, chunk_nr = DO_PAGES_STAT_CHUNK_NR;
+	int err;
 
-		chunk_nr = nr_pages;
-        if (chunk_nr > DO_PAGES_STAT_CHUNK_NR)
-            chunk_nr = DO_PAGES_STAT_CHUNK_NR;
-        
-        if (copy_from_user(chunk_pages, pages, chunk_nr * sizeof(*chunk_pages)))
-            break;
+	for (i = 0; i < nr_pages; i += chunk_nr) {
+		if (chunk_nr + i > nr_pages)
+			chunk_nr = nr_pages - i;
+
+		err = copy_from_user(chunk_pages, &pages[i],
+				     chunk_nr * sizeof(*chunk_pages));
+		if (err) {
+			err = -EFAULT;
+			goto out;
+		}
 
 		do_pages_stat_array(mm, chunk_nr, chunk_pages, chunk_status);
 
-		if (copy_to_user(status, chunk_status, chunk_nr * sizeof(*status)))
-            break;
+		err = copy_to_user(&status[i], chunk_status,
+				   chunk_nr * sizeof(*chunk_status));
+		if (err) {
+			err = -EFAULT;
+			goto out;
+		}
+	}
+	err = 0;
 
-        pages += chunk_nr;
-        status += chunk_nr;
-        nr_pages -= chunk_nr;
-    }
-    return nr_pages ? -EFAULT : 0;
+out:
+	return err;
 }
 
 /*

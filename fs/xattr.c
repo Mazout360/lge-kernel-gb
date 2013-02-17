@@ -633,7 +633,6 @@ generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
 	unsigned int size = 0;
 
 	if (!buffer) {
-		for_each_xattr_handler(handlers, handler) {
             size += handler->list(dentry, NULL, 0, NULL, 0,
                                          handler->flags);
         }

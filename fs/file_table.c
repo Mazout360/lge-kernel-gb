@@ -22,11 +22,8 @@
 #include <linux/fsnotify.h>
 #include <linux/sysctl.h>
 #include <linux/percpu_counter.h>
-#include <linux/ima.h>
 
 #include <asm/atomic.h>
-
-#include "internal.h"
 
 /* sysctl tunables... */
 struct files_stat_struct files_stat = {
@@ -168,8 +165,8 @@ EXPORT_SYMBOL(get_empty_filp);
  * If all the callers of init_file() are eliminated, its
  * code should be moved into this function.
  */
-struct file *alloc_file(struct path *path, fmode_t mode,
-                        const struct file_operations *fop)
+struct file *alloc_file(struct vfsmount *mnt, struct dentry *dentry,
+		fmode_t mode, const struct file_operations *fop)
 {
 	struct file *file;
 
@@ -177,26 +174,10 @@ struct file *alloc_file(struct path *path, fmode_t mode,
 	if (!file)
 		return NULL;
 
-	file->f_path = *path;
-    file->f_mapping = path->dentry->d_inode->i_mapping;
-	file->f_mode = mode;
-	file->f_op = fop;
-
-	/*
-	 * These mounts don't really matter in practice
-	 * for r/o bind mounts.  They aren't userspace-
-	 * visible.  We do this for consistency, and so
-	 * that we can do debugging checks at __fput()
-	 */
-	if ((mode & FMODE_WRITE) && !special_file(path->dentry->d_inode->i_mode)) {
-        int error = 0;
-		file_take_write(file);
-		error = mnt_clone_write(path->mnt);
-		WARN_ON(error);
-	}
-    ima_counts_get(file);
+	init_file(file, mnt, dentry, mode, fop);
 	return file;
 }
+EXPORT_SYMBOL(alloc_file);
 
 /**
  * init_file - initialize a 'struct file'
@@ -216,7 +197,7 @@ struct file *alloc_file(struct path *path, fmode_t mode,
  * of this should be moving to alloc_file().
  */
 int init_file(struct file *file, struct vfsmount *mnt, struct dentry *dentry,
-              fmode_t mode, const struct file_operations *fop)
+	   fmode_t mode, const struct file_operations *fop)
 {
 	int error = 0;
 	file->f_path.dentry = dentry;
@@ -224,7 +205,7 @@ int init_file(struct file *file, struct vfsmount *mnt, struct dentry *dentry,
 	file->f_mapping = dentry->d_inode->i_mapping;
 	file->f_mode = mode;
 	file->f_op = fop;
-    
+
 	/*
 	 * These mounts don't really matter in practice
 	 * for r/o bind mounts.  They aren't userspace-
