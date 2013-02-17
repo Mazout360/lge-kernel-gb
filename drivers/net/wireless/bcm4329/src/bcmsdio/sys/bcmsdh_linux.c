@@ -195,7 +195,7 @@ int bcmsdh_probe(struct device *dev)
 	irq_flags = \
 		IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE;
 #else
-	irq_flags = IRQF_TRIGGER_FALLING;
+	 irq_flags = IRQF_TRIGGER_FALLING;
 #endif /* HW_OOB */
 	irq = dhd_customer_oob_irq_map(&irq_flags);
 	if  (irq < 0) {
@@ -637,7 +637,8 @@ int bcmsdh_register_oob_intr(void * dhdp)
 		if (error)
 			return -ENODEV;
 
-		set_irq_wake(sdhcinfo->oob_irq, 1);
+		//set_irq_wake(sdhcinfo->oob_irq, 1);
+		enable_irq_wake(sdhcinfo->oob_irq);
 		sdhcinfo->oob_irq_registered = TRUE;
 	}
 
@@ -648,7 +649,8 @@ void bcmsdh_unregister_oob_intr(void)
 {
 	SDLX_MSG(("%s: Enter\n", __FUNCTION__));
 
-	set_irq_wake(sdhcinfo->oob_irq, 0);
+	//set_irq_wake(sdhcinfo->oob_irq, 0);
+	disable_irq_wake(sdhcinfo->oob_irq);
 	disable_irq(sdhcinfo->oob_irq);	/* just in case.. */
 	free_irq(sdhcinfo->oob_irq, NULL);
 	sdhcinfo->oob_irq_registered = FALSE;

@@ -53,7 +53,7 @@ EXTRA_CFLAGS = \
 	-DBCMLXSDMMC \
 	-DBCMPLATFORM_BUS \
 	-DSDIO_ISR_THREAD \
-	-Wall -Wstrict-prototypes -Werror \
+	-Wall -Wstrict-prototypes \
 	-I$(SRCROOT) \
 	-I$(SRCROOT)/include \
 	-I$(SRCROOT)/shared \
@@ -70,8 +70,9 @@ EXTRA_CFLAGS = \
 	-DDHD_SCHED \
 	-DMMC_SDIO_ABORT \
 	-DGET_CUSTOM_MAC_ENABLE \
-	-DCONFIG_FIRST_SCAN \
-	-DCSCAN \
+	-DCONFIG_FIRST_SCAN 
+	-DEXTREME_PM
+	-DCSCAN
 
 #	\
 	-fshort-wchar \

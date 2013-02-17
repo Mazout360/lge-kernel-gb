@@ -520,7 +520,7 @@ dhd_prot_stop(dhd_pub_t *dhd)
 	/* Nothing to do for CDC */
 }
 
-/* LGE_CHANGE_S, [], 2009-11-19, Use deepsleep instead of dhd_dev_reset when driver start or stop */
+/*                                                                                                              */
 #if defined(CONFIG_LGE_BCM432X_PATCH) && defined(CONFIG_BRCM_USE_DEEPSLEEP)
 extern dhd_pub_t * get_dhd_pub_from_dev(struct net_device *dev);
 int dhd_deep_sleep(struct net_device *dev, int flag)
@@ -570,5 +570,5 @@ int dhd_deep_sleep(struct net_device *dev, int flag)
     return 0;
 
 }
-#endif /* CONFIG_LGE_BCM432X_PATCH && CONFIG_BRCM_USE_DEEPSLEEP */
-/* LGE_CHANGE_E, [], 2009-11-19, Use deepsleep instead of dhd_dev_reset when driver start or stop */
+#endif /*                                                       */
+/*                                                                                                              */

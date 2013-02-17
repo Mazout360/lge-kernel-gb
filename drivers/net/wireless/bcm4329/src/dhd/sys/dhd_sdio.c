@@ -594,7 +594,7 @@ dhdsdio_htclk(dhd_bus_t *bus, bool on, bool pendok)
 			          !SBSDIO_CLKAV(clkctl, bus->alp_only)), PMU_MAX_TRANSITION_DLY);
 		}
 		if (err) {
-			printk("[DEBUG] %s:%d dhd_mmc_suspend %d\n",__func__,__LINE__,dhd_mmc_suspend);
+//			printk("[DEBUG] %s:%d dhd_mmc_suspend %d\n",__func__,__LINE__,dhd_mmc_suspend);
 			DHD_ERROR(("%s: HT Avail request error: %d\n", __FUNCTION__, err));
 			return BCME_ERROR;
 		}
@@ -760,8 +760,8 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 		/* Now request HT Avail on the backplane */
 		ret = dhdsdio_htclk(bus, TRUE, pendok);
 		if (ret == BCME_OK) {
-		dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
-		bus->activity = TRUE;
+			dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
+			bus->activity = TRUE;
 		}
 		break;
 
@@ -4067,7 +4067,7 @@ dhdsdio_dpc(dhd_bus_t *bus)
 	bool resched = FALSE;	  /* Flag indicating resched wanted */
 #if defined(CONFIG_LGE_BCM432X_PATCH)		//by sjpark 11-02-01
 	int reset_flag = FALSE;
-#endif	
+#endif
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 	/* Start with leftover status bits */
@@ -4276,11 +4276,11 @@ clkwait:
 	if ((bus->dhd->busstate == DHD_BUS_DOWN) || bcmsdh_regfail(sdh)) {
 		DHD_ERROR(("%s: failed backplane access over SDIO, halting operation %d \n",
 		           __FUNCTION__, bcmsdh_regfail(sdh)));
-// 20110201  Disable SDIO interrupt when BUS is down [START]
+//                                                                            
 #if defined(CONFIG_LGE_BCM432X_PATCH)
 		bcmsdh_intr_disable(bus->sdh);
 #endif
-// 20110201  Disable SDIO interrupt when BUS is down [END]
+//                                                                          
 		bus->dhd->busstate = DHD_BUS_DOWN;
 		bus->intstatus = 0;
 #if defined(CONFIG_LGE_BCM432X_PATCH)		//by sjpark 11-02-01
@@ -4344,11 +4344,11 @@ dhdsdio_isr(void *arg)
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
-// 20110212  Prevent BUS IS DOWN error [START]
+//                                                              
 #if defined(CONFIG_LGE_BCM432X_PATCH)
 	dhd_mmc_suspend = FALSE;
 #endif
-// 20110212  Prevent BUS IS DOWN error [END]
+//                                                            
 
 	if (!bus) {
 		DHD_ERROR(("%s : bus is null pointer , exit \n", __FUNCTION__));
@@ -5027,7 +5027,6 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 		           err, DHD_INIT_CLKCTL1, clkctl));
 		goto fail;
 	}
-
 
 #ifdef DHD_DEBUG
 	if (DHD_INFO_ON()) {
@@ -5856,20 +5855,20 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 					bcmerror = dhd_bus_init((dhd_pub_t *) bus->dhd, FALSE);
 					if (bcmerror == BCME_OK) {
 #if defined(OOB_INTR_ONLY)
-					dhd_enable_oob_intr(bus, TRUE);
+						dhd_enable_oob_intr(bus, TRUE);
 #endif /* defined(OOB_INTR_ONLY) */
 
-					bus->dhd->dongle_reset = FALSE;
-					bus->dhd->up = TRUE;
+						bus->dhd->dongle_reset = FALSE;
+						bus->dhd->up = TRUE;
 
 #if !defined(IGNORE_ETH0_DOWN)
-					/* Restore flow control  */
-					dhd_txflowcontrol(bus->dhd, 0, OFF);
+						/* Restore flow control  */
+						dhd_txflowcontrol(bus->dhd, 0, OFF);
 #endif 
 						/* Turning on watchdog back */
 						dhd_os_wd_timer(dhdp, dhd_watchdog_ms);
 
-					DHD_TRACE(("%s: WLAN ON DONE\n", __FUNCTION__));
+						DHD_TRACE(("%s: WLAN ON DONE\n", __FUNCTION__));
 					} else {
 						dhd_bus_stop(bus, FALSE);
 						dhdsdio_release_dongle(bus, bus->dhd->osh);

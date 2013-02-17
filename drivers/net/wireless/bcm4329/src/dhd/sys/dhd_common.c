@@ -47,11 +47,11 @@ int dhd_msg_level;
 
 char fw_path[MOD_PARAM_PATHLEN];
 char nv_path[MOD_PARAM_PATHLEN];
-/* LGE_CHANGE_S [] 2009-04-03, configs */
+/*                                                   */
 #if defined(CONFIG_LGE_BCM432X_PATCH)
 char config_path[MOD_PARAM_PATHLEN] = "";
-#endif /* CONFIG_LGE_BCM432X_PATCH */
-/* LGE_CHANGE_E [] 2009-04-03, configs */
+#endif /*                          */
+/*                                                   */
 
 /* Last connection success/failure status */
 uint32 dhd_conn_event;
@@ -63,10 +63,10 @@ uint32 dhd_conn_reason;
 #define dtoh32(i) i
 #define dtoh16(i) i
 
-/* LGE_CHANGE_S [] 2010-12-10, mac write */
+/*                                                        */
 #define NV_WIFI_MACADDR "/data/misc/wifi/config_mac"
 //#define NV_WIFI_MACFLAG "/proc/nvdata/WIFI_FLAG"
-/* LGE_CHANGE_E [] 2010-12-10, mac write */
+/*                                                        */
 
 extern int dhdcdc_set_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint len);
 extern void dhd_ind_scan_confirm(void *h, bool status);
@@ -148,6 +148,8 @@ dhd_common_init(void)
 	 * first time that the driver is initialized vs subsequent initializations.
 	 */
 	dhd_msg_level = DHD_ERROR_VAL;
+//	dhd_msg_level = 0x091f; //sangjun.bae2012
+//	dhd_msg_level = 0xffff; //sangjun.bae2012
 #ifdef CONFIG_BCM4329_FW_PATH
 	strncpy(fw_path, CONFIG_BCM4329_FW_PATH, MOD_PARAM_PATHLEN-1);
 #else
@@ -1220,7 +1222,7 @@ dhd_arp_offload_enable(dhd_pub_t * dhd, int arp_enable)
 		__FUNCTION__, arp_enable));
 }
 
-/* LGE_CHANGE_S [] 2009-04-03, configs */
+/*                                                   */
 #if defined(CONFIG_LGE_BCM432X_PATCH)
 #include <linux/fs.h>
 #include <linux/ctype.h>
@@ -1328,7 +1330,7 @@ static int dhd_preinit_proc(dhd_pub_t *dhd, int ifidx, char *name, char *value)
 		var_int = (int)simple_strtol(value, NULL, 0);
 		return dhdcdc_set_ioctl(dhd, ifidx, WLC_SET_PM,
 				&var_int, sizeof(var_int));
-/* LGE_CHANGE_S, [], 2010-06-28, < MAC write > */
+/*                                                                */
 	} else if(!strcmp(name,"cur_etheraddr")){
         struct ether_addr ea;
         char buf[32];
@@ -1365,7 +1367,7 @@ static int dhd_preinit_proc(dhd_pub_t *dhd, int ifidx, char *name, char *value)
             memcpy(dhd->mac.octet, (void *)&ea, ETHER_ADDR_LEN);
             return ret;
         }
-/* LGE_CHANGE_E, [], 2010-06-28, < MAC write > */		
+/*                                                                */		
 	} else {
 		uint iovlen;
 		char iovbuf[WLC_IOCTL_SMLEN];
@@ -1454,10 +1456,10 @@ err:
 	ret = -1;
 	goto out;
 }
-#endif /* CONFIG_LGE_BCM432X_PATCH */
-/* LGE_CHANGE_E [] 2009-04-03, configs */
+#endif /*                          */
+/*                                                   */
 
-/* LGE_CHANGE_S [] 2010-12-10, mac write */
+/*                                                        */
 #ifdef GET_CUSTOM_MAC_ENABLE
 static uint32 dhd_util_hex2num(uchar c)
 {
@@ -1600,7 +1602,7 @@ static int dhd_get_curr_etheraddr(dhd_pub_t *dhd, char* macaddr)
 
 #endif // GET_CUSTOM_MAC_ENABLE
 
-/* LGE_CHANGE_E [] 2010-12-10, mac write */
+/*                                                        */
 
 int
 dhd_preinit_ioctls(dhd_pub_t *dhd)
@@ -1610,28 +1612,28 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	char buf[128], *ptr;
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	uint power_mode = PM_FAST;
-#endif /* CONFIG_LGE_BCM432X_PATCH */
+#endif /*                          */
 	uint32 dongle_align = DHD_SDALIGN;
 	uint32 glom = 0;
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	uint bcn_timeout = 4;
-#endif /* CONFIG_LGE_BCM432X_PATCH */
+#endif /*                          */
 	int scan_assoc_time = 40;
 	int scan_unassoc_time = 40;
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	uint32 listen_interval = LISTEN_INTERVAL; /* Default Listen Interval in Beacons */
-#endif /* CONFIG_LGE_BCM432X_PATCH */
+#endif /*                          */
 #if defined(SOFTAP)
 	uint dtim = 1;
 #endif 
 	int ret = 0;
 #ifdef GET_CUSTOM_MAC_ENABLE
 	struct ether_addr ea_addr;
-/* LGE_CHANGE_S [] 2010-12-10, mac write */
+/*                                                        */
 	char nvbuf_ether_addr_tmp[ETHER_ADDR_LEN*2 + 1] = {0,};		// +1 for NULL
 //	char nvbuf_ether_addr_flag[2] = {0,};		// +1 for NULL
 	char nvbuf_ether_addr[ETHER_ADDR_LEN] = {0,};
-/* LGE_CHANGE_E [] 2010-12-10, mac write */
+/*                                                        */
 
 #endif /* GET_CUSTOM_MAC_ENABLE */
 
@@ -1643,7 +1645,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	** firmware but unique per board mac address maybe provided by customer code
 	*/
 
-/* LGE_CHANGE_S [] 2010-12-10, mac write */
+/*                                                        */
 //	ret = dhd_custom_read_nvdata(dhd, NV_WIFI_MACFLAG, nvbuf_ether_addr_flag, sizeof(char));
 
 //	if (!ret) {
@@ -1693,7 +1695,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	}
 
 	//ret = dhd_custom_get_mac_address(ea_addr.octet);
-/* LGE_CHANGE_E [] 2010-12-10, mac write */
+/*                                                        */
 
 	if (!ret) {
 		bcm_mkiovar("cur_etheraddr", (void *)&ea_addr, ETHER_ADDR_LEN, buf, sizeof(buf));
@@ -1705,11 +1707,11 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 			memcpy(dhd->mac.octet, (void *)&ea_addr, ETHER_ADDR_LEN);
 	}
 #endif  /* GET_CUSTOM_MAC_ENABLE */
-/* LGE_CHANGE_S [] 2009-04-03, configs */
+/*                                                   */
 #if defined(CONFIG_LGE_BCM432X_PATCH)
 	dhd_preinit_config(dhd, 0);
-#endif /* CONFIG_LGE_BCM432X_PATCH */
-/* LGE_CHANGE_E [] 2009-04-03, configs */
+#endif /*                          */
+/*                                                   */
 
 	/* Set Country code */
 	if (dhd->dhd_cspec.ccode[0] != 0) {
@@ -1717,14 +1719,14 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 			sizeof(wl_country_t), iovbuf, sizeof(iovbuf));
 		if ((ret = dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf))) < 0)
 			DHD_ERROR(("%s: country code setting failed\n", __FUNCTION__));
-		}
+	}
 
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	/* Set Listen Interval */
 	bcm_mkiovar("assoc_listen", (char *)&listen_interval, 4, iovbuf, sizeof(iovbuf));
 	if ((ret = dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf))) < 0)
 		DHD_ERROR(("%s assoc_listen failed %d\n", __FUNCTION__, ret));
-#endif /* CONFIG_LGE_BCM432X_PATCH */
+#endif /*                          */
 
 	/* query for 'ver' to get version info from firmware */
 	memset(buf, 0, sizeof(buf));
@@ -1735,12 +1737,12 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	/* Print fw version info */
 	DHD_ERROR(("Firmware version = %s\n", buf));
 
-/* LGE_CHANGE_S [] 2009-08-27, already PM setup is configured */
+/*                                                                          */
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	/* Set PowerSave mode */
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
-#endif /* CONFIG_LGE_BCM432X_PATCH */
-/* LGE_CHANGE_E [] 2009-08-27, already PM setup is configured */
+#endif /*                          */
+/*                                                                          */
 
 	/* Match Host and Dongle rx alignment */
 	bcm_mkiovar("bus:txglomalign", (char *)&dongle_align, 4, iovbuf, sizeof(iovbuf));
@@ -1750,7 +1752,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	bcm_mkiovar("bus:txglom", (char *)&glom, 4, iovbuf, sizeof(iovbuf));
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf));
 
-/* LGE_CHANGE_S [] 2009-04-08, roam_off */
+/*                                                    */
 #if !defined(CONFIG_LGE_BCM432X_PATCH)
 	/* Setup timeout if Beacons are lost and roam is off to report link down */
 	bcm_mkiovar("bcn_timeout", (char *)&bcn_timeout, 4, iovbuf, sizeof(iovbuf));
@@ -1759,8 +1761,8 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	/* Enable/Disable build-in roaming to allowed ext supplicant to take of romaing */
 	bcm_mkiovar("roam_off", (char *)&dhd_roam, 4, iovbuf, sizeof(iovbuf));
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf));
-#endif /* CONFIG_LGE_BCM432X_PATCH */
-/* LGE_CHANGE_E [] 2009-04-08, roam_off */
+#endif /*                          */
+/*                                                    */
 
 #if defined(SOFTAP)
 	if (ap_fw_loaded == TRUE) {
@@ -1814,7 +1816,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 				DHD_ERROR(("%s: Original band restore failed\n", __FUNCTION__));
 		}
 	}
-#endif /* CONFIG_LGE_BCM432X_PATCH */
+#endif /*                          */
 
 	/* Force STA UP */
 	if (dhd_radio_up)
@@ -1917,7 +1919,7 @@ dhd_iscan_free_buf(void *dhdp, iscan_buf_t *iscan_delete)
 	dhd_pub_t *dhd = dhd_bus_pub(dhdp);
 
 	dhd_iscan_lock();
-	/* If iscan_delete is null then delete the entire 
+	/* If iscan_delete is null then delete the entire
 	 * chain or else delete specific one provided
 	 */
 	if (!iscan_delete) {

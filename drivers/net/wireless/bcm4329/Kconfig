@@ -20,7 +20,7 @@ config BCM4329_GPIO_BT_RESET
 	default 93
 	depends on BCM4329
 
-#, 20101105, Kconfig deleted  
+#sunghoon.kim@lge.com, 20101105, Kconfig deleted  
 #config BCM4329_GPIO_WL_RESET
 #	int "GPIO WL_RESET"
 #	default 110
