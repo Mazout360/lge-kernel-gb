@@ -1123,6 +1123,12 @@ config TELCLOCK
 	  /sys/devices/platform/telco_clock, with a number of files for
 	  controlling the behavior of this hardware.
 
+config FRANDOM
+	tristate "Fast random number generator"
+	default n
+	help
+	  Support for the fast random number generator.
+
 config DEVPORT
 	bool
 	depends on !M68K
