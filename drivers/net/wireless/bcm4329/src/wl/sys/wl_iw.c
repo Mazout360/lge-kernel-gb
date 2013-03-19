@@ -110,7 +110,7 @@ printf x
 
 #include <linux/rtnetlink.h>
 
-#define WL_IW_USE_ISCAN  1
+#define WL_IW_USE_ISCAN  0
 #define ENABLE_ACTIVE_PASSIVE_SCAN_SUPPRESS  0
 
 
