@@ -1001,7 +1001,18 @@ static inline void dec_mm_counter_page(struct mm_struct *mm, int member, struct 
 }
 
 void sync_mm_rss(struct task_struct *task, struct mm_struct *mm);
-               
+
+/*
+ * This struct is used to pass information from page reclaim to the shrinkers.
+ * We consolidate the values for easier extention later.
+ */
+struct shrink_control {
+    gfp_t gfp_mask;
+    
+    /* How many slab objects shrinker() should scan and try to reclaim */
+    unsigned long nr_to_scan;
+};
+
 /*
  * A callback you can register to apply pressure to ageable caches.
  *
@@ -1018,7 +1029,7 @@ void sync_mm_rss(struct task_struct *task, struct mm_struct *mm);
  * querying the cache size, so a fastpath for that case is appropriate.
  */
 struct shrinker {
-	int (*shrink)(int nr_to_scan, gfp_t gfp_mask);
+	int (*shrink)(struct shrinker *, struct shrink_control *sc);
 	int seeks;	/* seeks to recreate an obj */
 
 	/* These are for internal use */
@@ -1439,8 +1450,9 @@ int in_gate_area_no_task(unsigned long addr);
 
 int drop_caches_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
-unsigned long shrink_slab(unsigned long scanned, gfp_t gfp_mask,
-			unsigned long lru_pages);
+unsigned long shrink_slab(struct shrink_control *shrink,
+                          unsigned long nr_pages_scanned,
+                          unsigned long lru_pages);
 
 #ifndef CONFIG_MMU
 #define randomize_va_space 0

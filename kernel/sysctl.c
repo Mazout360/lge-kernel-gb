@@ -51,6 +51,7 @@
 #include <linux/ftrace.h>
 #include <linux/slow-work.h>
 #include <linux/perf_event.h>
+#include <linux/oom.h>
 
 #include <asm/uaccess.h>
 #include <asm/processor.h>
@@ -70,9 +71,6 @@ extern int C_A_D;
 extern int print_fatal_signals;
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
-extern int sysctl_panic_on_oom;
-extern int sysctl_oom_kill_allocating_task;
-extern int sysctl_oom_dump_tasks;
 extern int max_threads;
 extern int core_uses_pid;
 extern int suid_dumpable;
@@ -1186,6 +1184,17 @@ static struct ctl_table vm_table[] = {
 		.extra1		= (void *)&hugetlb_zero,
 		.extra2		= (void *)&hugetlb_infinity,
 	 },
+#ifdef CONFIG_NUMA
+    {
+        .procname       = "nr_hugepages_mempolicy",
+        .data           = NULL,
+        .maxlen         = sizeof(unsigned long),
+        .mode           = 0644,
+        .proc_handler   = &hugetlb_mempolicy_sysctl_handler,
+        .extra1    = (void *)&hugetlb_zero,
+        .extra2    = (void *)&hugetlb_infinity,
+        },
+#endif
 	 {
 		.ctl_name	= VM_HUGETLB_GROUP,
 		.procname	= "hugetlb_shm_group",
