@@ -881,8 +881,11 @@ do_alignment(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 
 	if (ai_usermode & UM_SIGNAL)
 		force_sig(SIGBUS, current);
-	else
-		set_cr(cr_no_alignment);
+	else {
+        raw_local_irq_disable();
+    if (!(current_thread_info()->flags & _TIF_WORK_MASK))
+        set_cr(cr_no_alignment);
+    }
 
 	return 0;
 }
