@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/syscalls.h>
 #include <linux/freezer.h>
+#include <linux/delay.h>
 #include <linux/wakelock.h>
 
 /* 
@@ -43,7 +44,7 @@ static int try_to_freeze_tasks(bool sig_only)
 	do_gettimeofday(&start);
 
 	end_time = jiffies + TIMEOUT;
-	do {
+	while (true) {
 		todo = 0;
 		read_lock(&tasklist_lock);
 		do_each_thread(g, p) {
@@ -64,14 +65,14 @@ static int try_to_freeze_tasks(bool sig_only)
 				todo++;
 		} while_each_thread(g, p);
 		read_unlock(&tasklist_lock);
-		yield();			/* Yield is okay here */
 		if (todo && has_wake_lock(WAKE_LOCK_SUSPEND)) {
 			wakeup = 1;
 			break;
 		}
-		if (time_after(jiffies, end_time))
+		if (!todo || time_after(jiffies, end_time))
 			break;
-	} while (todo);
+        msleep(10);
+    }
 
 	do_gettimeofday(&end);
 	elapsed_csecs64 = timeval_to_ns(&end) - timeval_to_ns(&start);
@@ -89,14 +90,12 @@ static int try_to_freeze_tasks(bool sig_only)
 				"(%d tasks refusing to freeze):\n",
 				wakeup ? "aborted" : "failed",
 				elapsed_csecs / 100, elapsed_csecs % 100, todo);
-		if(!wakeup)
-			show_state();
 		read_lock(&tasklist_lock);
 		do_each_thread(g, p) {
 			task_lock(p);
 			if (freezing(p) && !freezer_should_skip(p) &&
 							elapsed_csecs > 100)
-				printk(KERN_ERR " %s\n", p->comm);
+				sched_show_task(p);
 			cancel_freezing(p);
 			task_unlock(p);
 		} while_each_thread(g, p);
