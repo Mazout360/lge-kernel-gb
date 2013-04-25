@@ -76,3 +76,25 @@ config BRCM_USE_STATIC_BUF
 	bool "Use static buff of osl_malloc"
 	default n
 	depends on BCM4329
+
+config BCM4329_WIFI_CONTROL_FUNC
+       bool "Use bcm4329_wlan device"
+       depends on BCM4329
+       default n
+       ---help---
+          Use this option to get various parameters from architecture specific
+          bcm4329_wlan platform device. Say n if unsure.
+
+config BCM4329_HW_OOB
+       bool "Use out of band interrupt"
+       depends on BCM4329
+       default n
+       ---help---
+          Use out of band interrupt for wake on wireless.
+
+config BCM4329_OOB_INTR_ONLY
+       bool "Use out of band interrupt only"
+       depends on BCM4329
+       default n
+       ---help---
+          Use out of band interrupt for all interrupts(including SDIO interrupts).
