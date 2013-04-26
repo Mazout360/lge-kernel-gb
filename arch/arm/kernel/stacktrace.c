@@ -28,7 +28,7 @@ int notrace unwind_frame(struct stackframe *frame)
 
 	/* only go to a higher address on the stack */
 	low = frame->sp;
-	high = ALIGN(low, THREAD_SIZE) + THREAD_SIZE;
+	high = ALIGN(low, THREAD_SIZE);
 
 	/* check current frame pointer is within bounds */
 	if (fp < (low + 12) || fp + 4 >= high)
@@ -97,11 +97,9 @@ void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 		 * What guarantees do we have here that 'tsk'
 		 * is not running on another CPU?
 		 */
-#ifdef CONFIG_MACH_STAR
-		WARN_ON(1);
-#else
-		BUG();
-#endif
+        if (trace->nr_entries < trace->max_entries)
+            trace->entries[trace->nr_entries++] = ULONG_MAX;
+        return;
 #else
 		data.no_sched_functions = 1;
 		frame.fp = thread_saved_fp(tsk);
