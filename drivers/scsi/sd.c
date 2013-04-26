@@ -2030,7 +2030,7 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	struct scsi_disk *sdkp = scsi_disk(disk);
 	struct scsi_device *sdp = sdkp->device;
 	unsigned char *buffer;
-	unsigned ordered;
+	unsigned flush = 0;
 
 	SCSI_LOG_HLQUEUE(3, sd_printk(KERN_INFO, sdkp,
 				      "sd_revalidate_disk\n"));
@@ -2076,13 +2076,13 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	 * dispatch function can alter request order, we cannot use
 	 * QUEUE_ORDERED_TAG_* even when ordered tag is supported.
 	 */
-	if (sdkp->WCE)
-		ordered = sdkp->DPOFUA
-			? QUEUE_ORDERED_DRAIN_FUA : QUEUE_ORDERED_DRAIN_FLUSH;
-	else
-		ordered = QUEUE_ORDERED_DRAIN;
+	if (sdkp->WCE) {
+        flush |= REQ_FLUSH;
+        if (sdkp->DPOFUA)
+            flush |= REQ_FUA;
+    }
 
-	blk_queue_ordered(sdkp->disk->queue, ordered, sd_prepare_flush);
+	blk_queue_flush(sdkp->disk->queue, flush);
 
 	set_capacity(disk, sdkp->capacity);
 	kfree(buffer);

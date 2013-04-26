@@ -8,47 +8,6 @@
 
 #include "blk.h"
 
-/**
- * blk_queue_ordered - does this queue support ordered writes
- * @q:        the request queue
- * @ordered:  one of QUEUE_ORDERED_*
- * @prepare_flush_fn: rq setup helper for cache flush ordered writes
- *
- * Description:
- *   For journalled file systems, doing ordered writes on a commit
- *   block instead of explicitly doing wait_on_buffer (which is bad
- *   for performance) can be a big win. Block drivers supporting this
- *   feature should call this function and indicate so.
- *
- **/
-int blk_queue_ordered(struct request_queue *q, unsigned ordered,
-		      prepare_flush_fn *prepare_flush_fn)
-{
-	if (!prepare_flush_fn && (ordered & (QUEUE_ORDERED_DO_PREFLUSH |
-					     QUEUE_ORDERED_DO_POSTFLUSH))) {
-		printk(KERN_ERR "%s: prepare_flush_fn required\n", __func__);
-		return -EINVAL;
-	}
-
-	if (ordered != QUEUE_ORDERED_NONE &&
-	    ordered != QUEUE_ORDERED_DRAIN &&
-	    ordered != QUEUE_ORDERED_DRAIN_FLUSH &&
-	    ordered != QUEUE_ORDERED_DRAIN_FUA &&
-	    ordered != QUEUE_ORDERED_TAG &&
-	    ordered != QUEUE_ORDERED_TAG_FLUSH &&
-	    ordered != QUEUE_ORDERED_TAG_FUA) {
-		printk(KERN_ERR "blk_queue_ordered: bad value %d\n", ordered);
-		return -EINVAL;
-	}
-
-	q->ordered = ordered;
-	q->next_ordered = ordered;
-	q->prepare_flush_fn = prepare_flush_fn;
-
-	return 0;
-}
-EXPORT_SYMBOL(blk_queue_ordered);
-
 /*
  * Cache flushing for ordered writes handling
  */
@@ -142,10 +101,9 @@ static void queue_flush(struct request_queue *q, unsigned which)
 	}
 
 	blk_rq_init(q, rq);
-	rq->cmd_flags = REQ_HARDBARRIER;
+	rq->cmd_flags = REQ_HARDBARRIER | REQ_FLUSH;
 	rq->rq_disk = q->bar_rq.rq_disk;
 	rq->end_io = end_io;
-	q->prepare_flush_fn(q, rq);
 
 	elv_insert(q, rq, ELEVATOR_INSERT_FRONT);
 }
@@ -287,7 +245,9 @@ static void bio_end_empty_barrier(struct bio *bio, int err)
 		clear_bit(BIO_UPTODATE, &bio->bi_flags);
 	}
 
-	complete(bio->bi_private);
+	if (bio->bi_private)
+        complete(bio->bi_private);
+    bio_put(bio);
 }
 
 /**
@@ -317,19 +277,22 @@ int blkdev_issue_flush(struct block_device *bdev, gfp_t gfp_mask,
 
 	bio = bio_alloc(gfp_mask, 0);
 	bio->bi_end_io = bio_end_empty_barrier;
-	bio->bi_private = &wait;
 	bio->bi_bdev = bdev;
-	submit_bio(WRITE_BARRIER, bio);
+	if (test_bit(BLKDEV_WAIT, &flags))
+        bio->bi_private = &wait;
 
-	wait_for_completion(&wait);
-
-	/*
-	 * The driver must store the error location in ->bi_sector, if
-	 * it supports it. For non-stacked drivers, this should be copied
-	 * from blk_rq_pos(rq).
-	 */
-	if (error_sector)
-		*error_sector = bio->bi_sector;
+	bio_get(bio);
+    submit_bio(WRITE_BARRIER, bio);
+    if (test_bit(BLKDEV_WAIT, &flags)) {
+        wait_for_completion(&wait);
+            /*
+              * The driver must store the error location in ->bi_sector, if
+              * it supports it. For non-stacked drivers, this should be
+              * copied from blk_rq_pos(rq).
+              */
+        if (error_sector)
+            *error_sector = bio->bi_sector;
+    }
 
 	if (bio_flagged(bio, BIO_EOPNOTSUPP))
 		ret = -EOPNOTSUPP;

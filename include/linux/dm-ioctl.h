@@ -266,9 +266,9 @@ enum {
 #define DM_DEV_SET_GEOMETRY	_IOWR(DM_IOCTL, DM_DEV_SET_GEOMETRY_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
-#define DM_VERSION_MINOR	15
+#define DM_VERSION_MINOR	18
 #define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl (2009-04-01)"
+#define DM_VERSION_EXTRA	"-ioctl (2010-06-29)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	(1 << 0) /* In/Out */
@@ -308,5 +308,17 @@ enum {
  * Set this to suspend without flushing queued ios.
  */
 #define DM_NOFLUSH_FLAG		(1 << 11) /* In */
+
+/*
+ * If set, any table information returned will relate to the inactive
+ * table instead of the live one.  Always check DM_INACTIVE_PRESENT_FLAG
+ * is set before using the data returned.
+ */
+#define DM_QUERY_INACTIVE_TABLE_FLAG  (1 << 12) /* In */
+
+/*
+ * If set, a uevent was generated for which the caller may need to wait.
+ */
+#define DM_UEVENT_GENERATED_FLAG  (1 << 13) /* Out */
 
 #endif				/* _LINUX_DM_IOCTL_H */

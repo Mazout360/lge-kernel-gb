@@ -1240,8 +1240,9 @@ static int __make_request(struct request_queue *q, struct bio *bio)
 	const unsigned int ff = bio->bi_rw & REQ_FAILFAST_MASK;
 	int rw_flags;
 
-	if ((bio->bi_rw & REQ_HARDBARRIER) &&
-	    (q->next_ordered == QUEUE_ORDERED_NONE)) {
+	/* REQ_HARDBARRIER is no more */
+    if (WARN_ONCE(bio->bi_rw & REQ_HARDBARRIER,
+        "block: HARDBARRIER is deprecated, use FLUSH/FUA instead\n")) {
 		bio_endio(bio, -EOPNOTSUPP);
 		return 0;
 	}
@@ -1387,7 +1388,7 @@ static void handle_bad_sector(struct bio *bio)
 			bdevname(bio->bi_bdev, b),
 			bio->bi_rw,
 			(unsigned long long)bio->bi_sector + bio_sectors(bio),
-			(long long)(bio->bi_bdev->bd_inode->i_size >> 9));
+			(long long)(i_size_read(bio->bi_bdev->bd_inode) >> 9));
 
 	set_bit(BIO_EOF, &bio->bi_flags);
 }
@@ -1440,7 +1441,7 @@ static inline int bio_check_eod(struct bio *bio, unsigned int nr_sectors)
 		return 0;
 
 	/* Test device or partition size, when known. */
-	maxsector = bio->bi_bdev->bd_inode->i_size >> 9;
+	maxsector = i_size_read(bio->bi_bdev->bd_inode) >> 9;
 	if (maxsector) {
 		sector_t sector = bio->bi_sector;
 
@@ -1580,11 +1581,11 @@ end_io:
  */
 void generic_make_request(struct bio *bio)
 {
-	if (current->bio_tail) {
+	struct bio_list bio_list_on_stack;
+    
+    if (current->bio_list) {
 		/* make_request is active */
-		*(current->bio_tail) = bio;
-		bio->bi_next = NULL;
-		current->bio_tail = &bio->bi_next;
+		bio_list_add(current->bio_list, bio);
 		return;
 	}
 	/* following loop may be a bit non-obvious, and so deserves some
@@ -1606,16 +1607,13 @@ void generic_make_request(struct bio *bio)
 	 * inlined) and to keep the structure simple.
 	 */
 	BUG_ON(bio->bi_next);
+    bio_list_init(&bio_list_on_stack);
+    current->bio_list = &bio_list_on_stack;
 	do {
-		current->bio_list = bio->bi_next;
-		if (bio->bi_next == NULL)
-			current->bio_tail = &current->bio_list;
-		else
-			bio->bi_next = NULL;
 		__generic_make_request(bio);
-		bio = current->bio_list;
+		bio = bio_list_pop(current->bio_list);
 	} while (bio);
-	current->bio_tail = NULL; /* deactivate */
+	current->bio_list = NULL; /* deactivate */
 }
 EXPORT_SYMBOL(generic_make_request);
 

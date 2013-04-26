@@ -586,13 +586,19 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int r = -EINVAL;
 	char *origin_path;
 	struct dm_exception_store *store;
-	unsigned args_used;
+	unsigned args_used, num_flush_requests = 1;
+    fmode_t origin_mode = FMODE_READ;
 
 	if (argc != 4) {
 		ti->error = "requires exactly 4 arguments";
 		r = -EINVAL;
 		goto bad_args;
 	}
+    
+    if (dm_target_is_snapshot_merge(ti)) {
+        num_flush_requests = 2;
+        origin_mode = FMODE_WRITE;
+    }
 
 	origin_path = argv[0];
 	argv++;
@@ -616,7 +622,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad_snap;
 	}
 
-	r = dm_get_device(ti, origin_path, 0, ti->len, FMODE_READ, &s->origin);
+	r = dm_get_device(ti, origin_path, 0, ti->len, origin_mode, &s->origin);
 	if (r) {
 		ti->error = "Cannot get origin device";
 		goto bad_origin;
@@ -690,7 +696,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	ti->private = s;
 	ti->split_io = s->store->chunk_size;
-	ti->num_flush_requests = 1;
+	ti->num_flush_requests = num_flush_requests;
 
 	return 0;
 
@@ -1041,6 +1047,14 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio,
 	struct dm_snapshot *s = ti->private;
 	int r = DM_MAPIO_REMAPPED;
 	chunk_t chunk;
+    if (unlikely(bio_empty_barrier(bio))) {
+        if (!map_context->target_request_nr)
+            bio->bi_bdev = s->origin->bdev;
+        else
+            bio->bi_bdev = s->cow->bdev;
+        map_context->ptr = NULL;
+        return DM_MAPIO_REMAPPED;
+    }
 	struct dm_snap_pending_exception *pe = NULL;
 
 	if (unlikely(bio_empty_barrier(bio))) {
