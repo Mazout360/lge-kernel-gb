@@ -31,6 +31,7 @@
 #include <linux/completion.h>
 #include <linux/transport_class.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
@@ -164,6 +165,8 @@ void scsi_remove_host(struct Scsi_Host *shost)
 			return;
 		}
 	spin_unlock_irqrestore(shost->host_lock, flags);
+    
+    scsi_autopm_get_host(shost);
 	scsi_forget_host(shost);
 	mutex_unlock(&shost->scan_mutex);
 	scsi_proc_host_rm(shost);
@@ -218,6 +221,10 @@ int scsi_add_host_with_dma(struct Scsi_Host *shost, struct device *dev,
 	error = device_add(&shost->shost_gendev);
 	if (error)
 		goto out;
+    
+    pm_runtime_set_active(&shost->shost_gendev);
+    pm_runtime_enable(&shost->shost_gendev);
+    device_enable_async_suspend(&shost->shost_gendev);
 
 	scsi_host_set_state(shost, SHOST_RUNNING);
 	get_device(shost->shost_gendev.parent);

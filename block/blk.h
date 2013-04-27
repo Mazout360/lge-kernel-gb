@@ -62,6 +62,8 @@ static inline void blk_clear_rq_urgent(struct request *rq)
  */
 #define ELV_ON_HASH(rq) hash_hashed(&(rq)->hash)
 
+struct request *blk_do_flush(struct request_queue *q, struct request *rq);
+
 static inline struct request *__elv_next_request(struct request_queue *q)
 {
 	struct request *rq;
@@ -69,8 +71,12 @@ static inline struct request *__elv_next_request(struct request_queue *q)
 	while (1) {
 		while (!list_empty(&q->queue_head)) {
 			rq = list_entry_rq(q->queue_head.next);
-			if (blk_do_ordered(q, &rq))
-				return rq;
+            if (!(rq->cmd_flags & (REQ_FLUSH | REQ_FUA)) ||
+                rq == &q->flush_rq)
+                return rq;
+			rq = blk_do_flush(q, rq);
+            if (rq)
+                return rq;
 		}
 
 		if (test_bit(QUEUE_FLAG_DEAD, &q->queue_flags) ||
@@ -154,14 +160,18 @@ static inline int queue_congestion_off_threshold(struct request_queue *q)
 
 static inline int blk_cpu_to_group(int cpu)
 {
+    int group = NR_CPUS;
 #ifdef CONFIG_SCHED_MC
 	const struct cpumask *mask = cpu_coregroup_mask(cpu);
-	return cpumask_first(mask);
+	group = cpumask_first(mask);
 #elif defined(CONFIG_SCHED_SMT)
-	return cpumask_first(topology_thread_cpumask(cpu));
+	group = cpumask_first(topology_thread_cpumask(cpu));
 #else
 	return cpu;
 #endif
+    if (likely(group < NR_CPUS))
+        return group;
+    return cpu;
 }
 
 /*

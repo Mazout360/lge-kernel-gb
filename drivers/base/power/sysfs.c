@@ -4,6 +4,7 @@
 
 #include <linux/device.h>
 #include <linux/string.h>
+#include <linux/pm_runtime.h>
 #include "power.h"
 
 /*
@@ -42,6 +43,38 @@
 
 static const char enabled[] = "enabled";
 static const char disabled[] = "disabled";
+
+#ifdef CONFIG_PM_RUNTIME
+static const char ctrl_auto[] = "auto";
+static const char ctrl_on[] = "on";
+
+static ssize_t control_show(struct device *dev, struct device_attribute *attr,
+                            char *buf)
+{
+	return sprintf(buf, "%s\n",
+                   dev->power.runtime_auto ? ctrl_auto : ctrl_on);
+}
+
+static ssize_t control_store(struct device * dev, struct device_attribute *attr,
+                             const char * buf, size_t n)
+{
+	char *cp;
+	int len = n;
+    
+	cp = memchr(buf, '\n', n);
+	if (cp)
+		len = cp - buf;
+	if (len == sizeof ctrl_auto - 1 && strncmp(buf, ctrl_auto, len) == 0)
+		pm_runtime_allow(dev);
+	else if (len == sizeof ctrl_on - 1 && strncmp(buf, ctrl_on, len) == 0)
+		pm_runtime_forbid(dev);
+	else
+		return -EINVAL;
+	return n;
+}
+
+static DEVICE_ATTR(control, 0644, control_show, control_store);
+#endif
 
 static ssize_t
 wake_show(struct device * dev, struct device_attribute *attr, char * buf)
@@ -107,6 +140,9 @@ static DEVICE_ATTR(async, 0644, async_show, async_store);
 #endif /* CONFIG_PM_SLEEP_ADVANCED_DEBUG */
 
 static struct attribute * power_attrs[] = {
+#ifdef CONFIG_PM_RUNTIME
+    &dev_attr_control.attr,
+#endif
 	&dev_attr_wakeup.attr,
 #ifdef CONFIG_PM_SLEEP_ADVANCED_DEBUG
     &dev_attr_async.attr,

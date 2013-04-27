@@ -168,7 +168,6 @@ static int act_log_check(struct blk_trace *bt, u32 what, sector_t sector,
 static const u32 ddir_act[2] = { BLK_TC_ACT(BLK_TC_READ),
 				 BLK_TC_ACT(BLK_TC_WRITE) };
 
-#define BLK_TC_HARDBARRIER  BLK_TC_BARRIER
 #define BLK_TC_RAHEAD    BLK_TC_AHEAD
 
 /* The ilog2() calls fall out because they're constant */
@@ -196,7 +195,6 @@ static void __blk_add_trace(struct blk_trace *bt, sector_t sector, int bytes,
 		return;
 
 	what |= ddir_act[rw & WRITE];
-	what |= MASK_TC_BIT(rw, HARDBARRIER);
     what |= MASK_TC_BIT(rw, SYNC);
     what |= MASK_TC_BIT(rw, RAHEAD);
 	what |= MASK_TC_BIT(rw, META);
@@ -550,6 +548,41 @@ int blk_trace_setup(struct request_queue *q, char *name, dev_t dev,
 }
 EXPORT_SYMBOL_GPL(blk_trace_setup);
 
+#if defined(CONFIG_COMPAT) && defined(CONFIG_X86_64)
+static int compat_blk_trace_setup(struct request_queue *q, char *name,
+                                  dev_t dev, struct block_device *bdev,
+                                  char __user *arg)
+{
+	struct blk_user_trace_setup buts;
+	struct compat_blk_user_trace_setup cbuts;
+	int ret;
+    
+	if (copy_from_user(&cbuts, arg, sizeof(cbuts)))
+		return -EFAULT;
+    
+	buts = (struct blk_user_trace_setup) {
+		.act_mask = cbuts.act_mask,
+		.buf_size = cbuts.buf_size,
+		.buf_nr = cbuts.buf_nr,
+		.start_lba = cbuts.start_lba,
+		.end_lba = cbuts.end_lba,
+		.pid = cbuts.pid,
+	};
+	memcpy(&buts.name, &cbuts.name, 32);
+    
+	ret = do_blk_trace_setup(q, name, dev, bdev, &buts);
+	if (ret)
+		return ret;
+    
+	if (copy_to_user(arg, &buts.name, 32)) {
+		blk_trace_remove(q);
+		return -EFAULT;
+	}
+    
+	return 0;
+}
+#endif
+
 int blk_trace_startstop(struct request_queue *q, int start)
 {
 	int ret;
@@ -602,6 +635,7 @@ int blk_trace_ioctl(struct block_device *bdev, unsigned cmd, char __user *arg)
 	if (!q)
 		return -ENXIO;
 
+    lock_kernel();
 	mutex_lock(&bdev->bd_mutex);
 
 	switch (cmd) {
@@ -609,6 +643,12 @@ int blk_trace_ioctl(struct block_device *bdev, unsigned cmd, char __user *arg)
 		bdevname(bdev, b);
 		ret = blk_trace_setup(q, b, bdev->bd_dev, bdev, arg);
 		break;
+#if defined(CONFIG_COMPAT) && defined(CONFIG_X86_64)
+    case BLKTRACESETUP32:
+        bdevname(bdev, b);
+        ret = compat_blk_trace_setup(q, b, bdev->bd_dev, bdev, arg);
+        break;
+#endif
 	case BLKTRACESTART:
 		start = 1;
 	case BLKTRACESTOP:
@@ -623,6 +663,7 @@ int blk_trace_ioctl(struct block_device *bdev, unsigned cmd, char __user *arg)
 	}
 
 	mutex_unlock(&bdev->bd_mutex);
+    unlock_kernel();
 	return ret;
 }
 
@@ -665,6 +706,9 @@ static void blk_add_trace_rq(struct request_queue *q, struct request *rq,
 	if (rq->cmd_flags & REQ_DISCARD)
 		rw |= REQ_DISCARD;
 
+    if (rq->cmd_flags & REQ_SECURE)
+        rw |= REQ_SECURE;
+    
 	if (rq->cmd_type == REQ_TYPE_BLOCK_PC) {
 		what |= BLK_TC_ACT(BLK_TC_PC);
 		__blk_add_trace(bt, 0, blk_rq_bytes(rq), rw,
@@ -1015,6 +1059,7 @@ static void fill_rwbs(char *rwbs, const struct blk_io_trace *t)
 		rwbs[i++] = 'S';
 	if (tc & BLK_TC_META)
 		rwbs[i++] = 'M';
+    
 out:
 	rwbs[i] = '\0';
 }
@@ -1743,12 +1788,12 @@ void blk_fill_rwbs(char *rwbs, u32 rw, int bytes)
 
 	if (rw & REQ_RAHEAD)
 		rwbs[i++] = 'A';
-	if (rw & REQ_HARDBARRIER)
-		rwbs[i++] = 'B';
 	if (rw & REQ_SYNC)
 		rwbs[i++] = 'S';
 	if (rw & REQ_META)
 		rwbs[i++] = 'M';
+    if (rw & REQ_SECURE)
+        rwbs[i++] = 'E';
 
 	rwbs[i] = '\0';
 }
@@ -1761,6 +1806,9 @@ void blk_fill_rwbs_rq(char *rwbs, struct request *rq)
 	if (rq->cmd_flags & REQ_DISCARD)
 		rw |= REQ_DISCARD;
 
+    if (rq->cmd_flags & REQ_SECURE)
+        rw |= REQ_SECURE;
+    
 	bytes = blk_rq_bytes(rq);
 
 	blk_fill_rwbs(rwbs, rw, bytes);

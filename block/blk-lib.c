@@ -39,8 +39,8 @@ int blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
 	struct request_queue *q = bdev_get_queue(bdev);
-	int type = flags & BLKDEV_IFL_BARRIER ?
-    DISCARD_BARRIER : DISCARD_NOBARRIER;
+	int type = REQ_WRITE | REQ_DISCARD;
+    unsigned int max_discard_sectors;
 	struct bio *bio;
 	int ret = 0;
     
@@ -50,9 +50,24 @@ int blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 	if (!blk_queue_discard(q))
 		return -EOPNOTSUPP;
     
-	while (nr_sects && !ret) {
-		unsigned int max_discard_sectors =
-        min(q->limits.max_discard_sectors, UINT_MAX >> 9);
+    /*
+     * Ensure that max_discard_sectors is of the proper
+     * granularity
+     */
+    max_discard_sectors = min(q->limits.max_discard_sectors, UINT_MAX >> 9);
+    if (q->limits.discard_granularity) {
+        unsigned int disc_sects = q->limits.discard_granularity >> 9;
+        
+        max_discard_sectors &= ~(disc_sects - 1);
+    }
+ 
+    if (flags & BLKDEV_IFL_SECURE) {
+        if (!blk_queue_secdiscard(q))
+            return -EOPNOTSUPP;
+        type |= REQ_SECURE;
+    }
+    
+    while (nr_sects && !ret) {
         
 		bio = bio_alloc(gfp_mask, 1);
 		if (!bio) {
@@ -136,7 +151,7 @@ static void bio_batch_end_io(struct bio *bio, int err)
 int blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
                          sector_t nr_sects, gfp_t gfp_mask, unsigned long flags)
 {
-	int ret = 0;
+	int ret;
 	struct bio *bio;
 	struct bio_batch bb;
 	unsigned int sz, issued = 0;
@@ -147,18 +162,15 @@ int blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
 	bb.wait = &wait;
 	bb.end_io = NULL;
     
-	if (flags & BLKDEV_IFL_BARRIER) {
-		/* issue async barrier before the data */
-		ret = blkdev_issue_flush(bdev, gfp_mask, NULL, 0);
-		if (ret)
-			return ret;
-	}
 submit:
+    ret = 0;
 	while (nr_sects != 0) {
 		bio = bio_alloc(gfp_mask,
                         min(nr_sects, (sector_t)BIO_MAX_PAGES));
-		if (!bio)
+		if (!bio) {
+            ret = -ENOMEM;
 			break;
+        }
         
 		bio->bi_sector = sector;
 		bio->bi_bdev   = bdev;
@@ -177,16 +189,10 @@ submit:
 			if (ret < (sz << 9))
 				break;
 		}
+        ret = 0;
 		issued++;
 		submit_bio(WRITE, bio);
 	}
-	/*
-	 * When all data bios are in flight. Send final barrier if requeted.
-	 */
-	if (nr_sects == 0 && flags & BLKDEV_IFL_BARRIER)
-		ret = blkdev_issue_flush(bdev, gfp_mask, NULL,
-                                 flags & BLKDEV_IFL_WAIT);
-    
     
 	if (flags & BLKDEV_IFL_WAIT)
     /* Wait for bios in-flight */

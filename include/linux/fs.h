@@ -8,6 +8,7 @@
 
 #include <linux/limits.h>
 #include <linux/ioctl.h>
+#include <linux/blk_types.h>
 
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but you can change
@@ -144,13 +145,13 @@ struct inodes_stat_t {
  *			of this IO.
  *
  */
-#define RW_MASK			1
-#define RWA_MASK		2
+#define RW_MASK      REQ_WRITE
+#define RWA_MASK    REQ_RAHEAD
 
 #define READ			0
-#define WRITE			1
-#define READA			2 /* readahead  - don't block if no resources */
-#define SWRITE			3 /* for ll_rw_block() - wait for buffer lock */
+#define WRITE      RW_MASK
+#define READA      RWA_MASK
+#define SWRITE      (WRITE | READA)
 
 #define READ_SYNC		(READ | REQ_SYNC | REQ_UNPLUG)
 #define READ_META		(READ | REQ_META)
@@ -160,15 +161,14 @@ struct inodes_stat_t {
 #define WRITE_META		(WRITE | REQ_META)
 #define WRITE_BARRIER		(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_UNPLUG | \
 REQ_HARDBARRIER)
+#define WRITE_FLUSH    (WRITE | REQ_SYNC | REQ_NOIDLE | REQ_UNPLUG | \
+         REQ_FLUSH)
+#define WRITE_FUA    (WRITE | REQ_SYNC | REQ_NOIDLE | REQ_UNPLUG | \
+                        REQ_FUA)
+#define WRITE_FLUSH_FUA    (WRITE | REQ_SYNC | REQ_NOIDLE | REQ_UNPLUG | \
+                                REQ_FLUSH | REQ_FUA)
 #define SWRITE_SYNC_PLUG	(SWRITE | REQ_SYNC | REQ_NOIDLE)
 #define SWRITE_SYNC		(SWRITE | REQ_SYNC | REQ_NOIDLE | REQ_UNPLUG)
-
-/*
- * These aren't really reads or writes, they pass down information about
- * parts of device that are now unused by the file system.
- */
-#define DISCARD_NOBARRIER	(WRITE | REQ_DISCARD)
-#define DISCARD_BARRIER		(WRITE | REQ_DISCARD | REQ_HARDBARRIER)
 
 #define SEL_IN		1
 #define SEL_OUT		2
@@ -311,6 +311,7 @@ REQ_HARDBARRIER)
 #define BLKALIGNOFF _IO(0x12,122)
 #define BLKPBSZGET _IO(0x12,123)
 #define BLKDISCARDZEROES _IO(0x12,124)
+#define BLKSECDISCARD _IO(0x12,125)
 
 #define BMAP_IOCTL 1		/* obsolete - kept for compatibility */
 #define FIBMAP	   _IO(0x00,1)	/* bmap access */
@@ -2208,7 +2209,6 @@ extern struct file * get_empty_filp(void);
 extern void file_move(struct file *f, struct list_head *list);
 extern void file_kill(struct file *f);
 #ifdef CONFIG_BLOCK
-struct bio;
 extern void submit_bio(int, struct bio *);
 extern int bdev_read_only(struct block_device *);
 #endif

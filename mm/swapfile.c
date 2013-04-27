@@ -141,8 +141,7 @@ static int discard_swap(struct swap_info_struct *si)
 	nr_blocks = ((sector_t)se->nr_pages - 1) << (PAGE_SHIFT - 9);
 	if (nr_blocks) {
 		err = blkdev_issue_discard(si->bdev, start_block,
-                                   nr_blocks, GFP_KERNEL,
-                                   BLKDEV_IFL_WAIT | BLKDEV_IFL_BARRIER);
+                                   nr_blocks, GFP_KERNEL, BLKDEV_IFL_WAIT);
 		if (err)
 			return err;
 		cond_resched();
@@ -153,8 +152,7 @@ static int discard_swap(struct swap_info_struct *si)
 		nr_blocks = (sector_t)se->nr_pages << (PAGE_SHIFT - 9);
         
 		err = blkdev_issue_discard(si->bdev, start_block,
-                                   nr_blocks, GFP_KERNEL,
-                                   BLKDEV_IFL_WAIT | BLKDEV_IFL_BARRIER);
+                                   nr_blocks, GFP_KERNEL, BLKDEV_IFL_WAIT);
 		if (err)
 			break;
         

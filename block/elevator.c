@@ -77,6 +77,12 @@ int elv_rq_merge_ok(struct request *rq, struct bio *bio)
 	if ((bio->bi_rw & REQ_DISCARD) != (rq->bio->bi_rw & REQ_DISCARD))
 		return 0;
 
+    /*
+     * Don't merge discard requests and secure discard requests
+     */
+    if ((bio->bi_rw & REQ_SECURE) != (rq->bio->bi_rw & REQ_SECURE))
+        return 0;
+    
 	/*
 	 * different data direction or already started, don't merge
 	 */
@@ -412,7 +418,7 @@ void elv_dispatch_sort(struct request_queue *q, struct request *rq)
 	q->nr_sorted--;
 
 	boundary = q->end_sector;
-	stop_flags = REQ_SOFTBARRIER | REQ_HARDBARRIER | REQ_STARTED;
+	stop_flags = REQ_SOFTBARRIER | REQ_STARTED;
 	list_for_each_prev(entry, &q->queue_head) {
 		struct request *pos = list_entry_rq(entry);
 
@@ -635,8 +641,6 @@ void elv_quiesce_end(struct request_queue *q)
 
 void elv_insert(struct request_queue *q, struct request *rq, int where)
 {
-	struct list_head *pos;
-	unsigned ordseq;
 	int unplug_it = 1;
 
 	trace_block_rq_insert(q, rq);
@@ -644,6 +648,13 @@ void elv_insert(struct request_queue *q, struct request *rq, int where)
 	rq->q = q;
 
 	switch (where) {
+        case ELEVATOR_INSERT_REQUEUE:
+                /*
+                 * Most requeues happen because of a busy condition,
+                 * don't force unplug of the queue for that case.
+                 * Clear unplug_it and fall through.
+                 */
+            unplug_it = 0;
 	case ELEVATOR_INSERT_FRONT:
 		rq->cmd_flags |= REQ_SOFTBARRIER;
 
@@ -686,36 +697,6 @@ void elv_insert(struct request_queue *q, struct request *rq, int where)
 		q->elevator->ops->elevator_add_req_fn(q, rq);
 		break;
 
-	case ELEVATOR_INSERT_REQUEUE:
-		/*
-		 * If ordered flush isn't in progress, we do front
-		 * insertion; otherwise, requests should be requeued
-		 * in ordseq order.
-		 */
-		rq->cmd_flags |= REQ_SOFTBARRIER;
-
-		/*
-		 * Most requeues happen because of a busy condition,
-		 * don't force unplug of the queue for that case.
-		 */
-		unplug_it = 0;
-
-		if (q->ordseq == 0) {
-			list_add(&rq->queuelist, &q->queue_head);
-			break;
-		}
-
-		ordseq = blk_ordered_req_seq(rq);
-
-		list_for_each(pos, &q->queue_head) {
-			struct request *pos_rq = list_entry_rq(pos);
-			if (ordseq <= blk_ordered_req_seq(pos_rq))
-				break;
-		}
-
-		list_add_tail(&rq->queuelist, pos);
-		break;
-
 	default:
 		printk(KERN_ERR "%s: bad insertion point %d\n",
 		       __func__, where);
@@ -734,26 +715,8 @@ void elv_insert(struct request_queue *q, struct request *rq, int where)
 void __elv_add_request(struct request_queue *q, struct request *rq, int where,
 		       int plug)
 {
-	if (q->ordcolor)
-		rq->cmd_flags |= REQ_ORDERED_COLOR;
-
-	if (rq->cmd_flags & (REQ_SOFTBARRIER | REQ_HARDBARRIER)) {
-		/*
-		 * toggle ordered color
-		 */
-		if (rq->cmd_flags & REQ_HARDBARRIER)
-			q->ordcolor ^= 1;
-
-		/*
-		 * barriers implicitly indicate back insertion
-		 */
-		if (where == ELEVATOR_INSERT_SORT)
-			where = ELEVATOR_INSERT_BACK;
-
-		/*
-		 * this request is scheduling boundary, update
-		 * end_sector
-		 */
+	if (rq->cmd_flags & REQ_SOFTBARRIER) {
+		/* barriers are scheduling boundary, update end_sector */
 		if (rq->cmd_type == REQ_TYPE_FS ||
             (rq->cmd_flags & REQ_DISCARD)) {
 			q->end_sector = rq_end_sector(rq);
@@ -877,24 +840,6 @@ void elv_completed_request(struct request_queue *q, struct request *rq)
 		if ((rq->cmd_flags & REQ_SORTED) &&
             e->ops->elevator_completed_req_fn)
 			e->ops->elevator_completed_req_fn(q, rq);
-	}
-
-	/*
-	 * Check if the queue is waiting for fs requests to be
-	 * drained for flush sequence.
-	 */
-	if (unlikely(q->ordseq)) {
-		struct request *next = NULL;
-
-		if (!list_empty(&q->queue_head))
-			next = list_entry_rq(q->queue_head.next);
-
-		if (!queue_in_flight(q) &&
-		    blk_ordered_cur_seq(q) == QUEUE_ORDSEQ_DRAIN &&
-		    (!next || blk_ordered_req_seq(next) > QUEUE_ORDSEQ_DRAIN)) {
-			blk_ordered_complete_seq(q, QUEUE_ORDSEQ_DRAIN, 0);
-			__blk_run_queue(q);
-		}
 	}
 }
 
@@ -1032,18 +977,19 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 {
 	struct elevator_queue *old_elevator, *e;
 	void *data;
+    int err;
 
 	/*
 	 * Allocate new elevator
 	 */
 	e = elevator_alloc(q, new_e);
 	if (!e)
-		return 0;
+		return -ENOMEM;
 
 	data = elevator_init_queue(q, e);
 	if (!data) {
 		kobject_put(&e->kobj);
-		return 0;
+		return -ENOMEM;
 	}
 
 	/*
@@ -1066,7 +1012,8 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 
 	__elv_unregister_queue(old_elevator);
 
-	if (elv_register_queue(q))
+	err = elv_register_queue(q);
+    if (err)
 		goto fail_register;
 
 	/*
@@ -1079,7 +1026,7 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 
 	blk_add_trace_msg(q, "elv switch: %s", e->elevator_type->elevator_name);
 
-	return 1;
+	return 0;
 
 fail_register:
 	/*
@@ -1094,17 +1041,19 @@ fail_register:
 	queue_flag_clear(QUEUE_FLAG_ELVSWITCH, q);
 	spin_unlock_irq(q->queue_lock);
 
-	return 0;
+	return err;
 }
 
-ssize_t elv_iosched_store(struct request_queue *q, const char *name,
-			  size_t count)
+/*
+ * Switch this queue to the given IO scheduler.
+ */
+int elevator_change(struct request_queue *q, const char *name)
 {
 	char elevator_name[ELV_NAME_MAX];
 	struct elevator_type *e;
 
 	if (!q->elevator)
-		return count;
+		return -ENXIO;
 
 	strlcpy(elevator_name, name, sizeof(elevator_name));
 	e = elevator_get(strstrip(elevator_name));
@@ -1115,13 +1064,27 @@ ssize_t elv_iosched_store(struct request_queue *q, const char *name,
 
 	if (!strcmp(elevator_name, q->elevator->elevator_type->elevator_name)) {
 		elevator_put(e);
-		return count;
+		return 0;
 	}
 
-	if (!elevator_switch(q, e))
-		printk(KERN_ERR "elevator: switch to %s failed\n",
-							elevator_name);
-	return count;
+	return elevator_switch(q, e);
+}
+EXPORT_SYMBOL(elevator_change);
+
+ssize_t elv_iosched_store(struct request_queue *q, const char *name,
+                        size_t count)
+{
+    int ret;
+    
+    if (!q->elevator)
+        return count;
+    
+    ret = elevator_change(q, name);
+    if (!ret)
+        return count;
+    
+    printk(KERN_ERR "elevator: switch to %s failed\n", name);
+    return ret;
 }
 
 ssize_t elv_iosched_show(struct request_queue *q, char *name)

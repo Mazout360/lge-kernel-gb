@@ -18,7 +18,7 @@ static int scsi_dev_type_suspend(struct device *dev, pm_message_t msg)
 {
 	struct device_driver *drv;
 	int err;
-
+    
 	err = scsi_device_quiesce(to_scsi_device(dev));
 	if (err == 0) {
 		drv = dev->driver;
@@ -33,7 +33,7 @@ static int scsi_dev_type_resume(struct device *dev)
 {
 	struct device_driver *drv;
 	int err = 0;
-
+    
 	drv = dev->driver;
 	if (drv && drv->resume)
 		err = drv->resume(dev);
@@ -47,7 +47,7 @@ static int scsi_dev_type_resume(struct device *dev)
 static int scsi_bus_suspend_common(struct device *dev, pm_message_t msg)
 {
 	int err = 0;
-
+    
 	if (scsi_is_sdev_device(dev))
 		err = scsi_dev_type_suspend(dev, msg);
 	return err;
@@ -56,10 +56,10 @@ static int scsi_bus_suspend_common(struct device *dev, pm_message_t msg)
 static int scsi_bus_resume_common(struct device *dev)
 {
 	int err = 0;
-
+    
 	if (scsi_is_sdev_device(dev))
 		err = scsi_dev_type_resume(dev);
-
+    
 	if (err == 0) {
 		pm_runtime_disable(dev);
 		pm_runtime_set_active(dev);
@@ -97,41 +97,41 @@ static int scsi_bus_poweroff(struct device *dev)
 static int scsi_runtime_suspend(struct device *dev)
 {
 	int err = 0;
-
+    
 	dev_dbg(dev, "scsi_runtime_suspend\n");
 	if (scsi_is_sdev_device(dev)) {
 		err = scsi_dev_type_suspend(dev, PMSG_AUTO_SUSPEND);
 		if (err == -EAGAIN)
 			pm_schedule_suspend(dev, jiffies_to_msecs(
-				round_jiffies_up_relative(HZ/10)));
+                                                      round_jiffies_up_relative(HZ/10)));
 	}
-
+    
 	/* Insert hooks here for targets, hosts, and transport classes */
-
+    
 	return err;
 }
 
 static int scsi_runtime_resume(struct device *dev)
 {
 	int err = 0;
-
+    
 	dev_dbg(dev, "scsi_runtime_resume\n");
 	if (scsi_is_sdev_device(dev))
 		err = scsi_dev_type_resume(dev);
-
+    
 	/* Insert hooks here for targets, hosts, and transport classes */
-
+    
 	return err;
 }
 
 static int scsi_runtime_idle(struct device *dev)
 {
 	int err;
-
+    
 	dev_dbg(dev, "scsi_runtime_idle\n");
-
+    
 	/* Insert hooks here for targets, hosts, and transport classes */
-
+    
 	if (scsi_is_sdev_device(dev))
 		err = pm_schedule_suspend(dev, 100);
 	else
@@ -142,7 +142,7 @@ static int scsi_runtime_idle(struct device *dev)
 int scsi_autopm_get_device(struct scsi_device *sdev)
 {
 	int	err;
-
+    
 	err = pm_runtime_get_sync(&sdev->sdev_gendev);
 	if (err < 0)
 		pm_runtime_put_sync(&sdev->sdev_gendev);
@@ -171,7 +171,7 @@ void scsi_autopm_put_target(struct scsi_target *starget)
 int scsi_autopm_get_host(struct Scsi_Host *shost)
 {
 	int	err;
-
+    
 	err = pm_runtime_get_sync(&shost->shost_gendev);
 	if (err < 0)
 		pm_runtime_put_sync(&shost->shost_gendev);

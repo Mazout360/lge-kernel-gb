@@ -251,6 +251,7 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
 	sdev->model = scsi_null_device_strs;
 	sdev->rev = scsi_null_device_strs;
 	sdev->host = shost;
+    sdev->queue_ramp_up_period = SCSI_DEFAULT_RAMP_UP_PERIOD;
 	sdev->id = starget->id;
 	sdev->lun = lun;
 	sdev->channel = starget->channel;
@@ -941,6 +942,8 @@ static int scsi_add_lun(struct scsi_device *sdev, unsigned char *inq_result,
 		}
 	}
 
+    sdev->max_queue_depth = sdev->queue_depth;
+    
 	/*
 	 * Ok, the device is now all set up, we can
 	 * register it and tell the rest of the kernel
@@ -1509,14 +1512,18 @@ struct scsi_device *__scsi_add_device(struct Scsi_Host *shost, uint channel,
 	starget = scsi_alloc_target(parent, channel, id);
 	if (!starget)
 		return ERR_PTR(-ENOMEM);
+    scsi_autopm_get_target(starget);
 
 	mutex_lock(&shost->scan_mutex);
 	if (!shost->async_scan)
 		scsi_complete_async_scans();
 
-	if (scsi_host_scan_allowed(shost))
+	if (scsi_host_scan_allowed(shost) && scsi_autopm_get_host(shost) == 0) {
 		scsi_probe_and_add_lun(starget, lun, NULL, &sdev, 1, hostdata);
+        scsi_autopm_put_host(shost);
+    }
 	mutex_unlock(&shost->scan_mutex);
+    scsi_autopm_put_target(starget);
 	scsi_target_reap(starget);
 	put_device(&starget->dev);
 
@@ -1570,6 +1577,7 @@ static void __scsi_scan_target(struct device *parent, unsigned int channel,
 	starget = scsi_alloc_target(parent, channel, id);
 	if (!starget)
 		return;
+    scsi_autopm_get_target(starget);
 
 	if (lun != SCAN_WILD_CARD) {
 		/*
@@ -1595,6 +1603,7 @@ static void __scsi_scan_target(struct device *parent, unsigned int channel,
 	}
 
  out_reap:
+    scsi_autopm_put_target(starget);
 	/* now determine if the target has any children at all
 	 * and if not, nuke it */
 	scsi_target_reap(starget);
@@ -1629,8 +1638,10 @@ void scsi_scan_target(struct device *parent, unsigned int channel,
 	if (!shost->async_scan)
 		scsi_complete_async_scans();
 
-	if (scsi_host_scan_allowed(shost))
+	if (scsi_host_scan_allowed(shost) && scsi_autopm_get_host(shost) == 0) {
 		__scsi_scan_target(parent, channel, id, lun, rescan);
+        scsi_autopm_put_host(shost);
+    }
 	mutex_unlock(&shost->scan_mutex);
 }
 EXPORT_SYMBOL(scsi_scan_target);
@@ -1682,7 +1693,7 @@ int scsi_scan_host_selected(struct Scsi_Host *shost, unsigned int channel,
 	if (!shost->async_scan)
 		scsi_complete_async_scans();
 
-	if (scsi_host_scan_allowed(shost)) {
+	if (scsi_host_scan_allowed(shost) && scsi_autopm_get_host(shost) == 0) {
 		if (channel == SCAN_WILD_CARD)
 			for (channel = 0; channel <= shost->max_channel;
 			     channel++)
@@ -1690,6 +1701,7 @@ int scsi_scan_host_selected(struct Scsi_Host *shost, unsigned int channel,
 						  rescan);
 		else
 			scsi_scan_channel(shost, channel, id, lun, rescan);
+        scsi_autopm_put_host(shost);
 	}
 	mutex_unlock(&shost->scan_mutex);
 
@@ -1827,8 +1839,11 @@ static void do_scsi_scan_host(struct Scsi_Host *shost)
 static int do_scan_async(void *_data)
 {
 	struct async_scan_data *data = _data;
-	do_scsi_scan_host(data->shost);
+	struct Scsi_Host *shost = data->shost;
+    
+    do_scsi_scan_host(shost);
 	scsi_finish_async_scan(data);
+    scsi_autopm_put_host(shost);
 	return 0;
 }
 
@@ -1843,16 +1858,20 @@ void scsi_scan_host(struct Scsi_Host *shost)
 
 	if (strncmp(scsi_scan_type, "none", 4) == 0)
 		return;
+    if (scsi_autopm_get_host(shost) < 0)
+        return;
 
 	data = scsi_prep_async_scan(shost);
 	if (!data) {
 		do_scsi_scan_host(shost);
+        scsi_autopm_put_host(shost);
 		return;
 	}
 
 	p = kthread_run(do_scan_async, data, "scsi_scan_%d", shost->host_no);
 	if (IS_ERR(p))
 		do_scan_async(data);
+    /* scsi_autopm_put_host(shost) is called in do_scan_async() */
 }
 EXPORT_SYMBOL(scsi_scan_host);
 
