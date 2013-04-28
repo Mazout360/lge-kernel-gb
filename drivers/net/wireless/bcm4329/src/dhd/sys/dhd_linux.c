@@ -42,6 +42,7 @@
 #include <linux/fs.h>
 #include <linux/inetdevice.h>
 #include <linux/mutex.h>
+#include <linux/device.h>
 
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
@@ -357,7 +358,7 @@ extern int dhdcdc_set_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint
 extern int	 wl_control_wl_start(struct net_device *dev);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 struct semaphore dhd_registration_sem;
-#define DHD_REGISTRATION_TIMEOUT  12000  /* msec : allowed time to finished dhd registration */
+#define DHD_REGISTRATION_TIMEOUT  24000  /* msec : allowed time to finished dhd registration */
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 /* load firmware and/or nvram values from the filesystem */
 module_param_string(firmware_path, firmware_path, MOD_PARAM_PATHLEN, 0);
@@ -2188,7 +2189,7 @@ dhd_del_softap_if(struct net_device *dev)
 #endif
 
 dhd_pub_t *
-dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
+dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen, void *dev)
 {
 	dhd_info_t *dhd = NULL;
 	struct net_device *net;
@@ -2205,7 +2206,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 		DHD_ERROR(("%s: OOM - alloc_etherdev\n", __FUNCTION__));
 		goto fail;
 	}
-    
+
+    SET_NETDEV_DEV(net, (struct device *)dev);
 	/* Allocate primary dhd_info */
 	if (!(dhd = MALLOC(osh, sizeof(dhd_info_t)))) {
 		DHD_ERROR(("%s: OOM - alloc dhd_info\n", __FUNCTION__));
@@ -2219,6 +2221,17 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	 */
 	memcpy(netdev_priv(net), &dhd, sizeof(dhd));
 	dhd->pub.osh = osh;
+    
+    init_MUTEX(&dhd->proto_sem);
+    init_MUTEX(&dhd->sdsem);
+    /* Initialize other structure content */
+    init_waitqueue_head(&dhd->ioctl_resp_wait);
+    init_waitqueue_head(&dhd->ctrl_wait);
+
+    /* Initialize the spinlocks */
+    spin_lock_init(&dhd->sdlock);
+    spin_lock_init(&dhd->txqlock);
+    spin_lock_init(&dhd->dhd_lock);
     
 	/* Set network interface name if it was provided as module parameter */
 	if (iface_name[0]) {
@@ -2241,19 +2254,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	net->netdev_ops = NULL;
 #endif
 	
-#if (LINUX_VERSION_CODE >=  KERNEL_VERSION(2, 6, 38))
-	mutex_init(&dhd->proto_sem);
-#else
-	init_MUTEX(&dhd->proto_sem);
-#endif
-	/* Initialize other structure content */
-	init_waitqueue_head(&dhd->ioctl_resp_wait);
-	init_waitqueue_head(&dhd->ctrl_wait);
-    
-	/* Initialize the spinlocks */
-	spin_lock_init(&dhd->sdlock);
-	spin_lock_init(&dhd->txqlock);
-	spin_lock_init(&dhd->dhd_lock);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
 	mutex_init(&dhd->wl_start_lock);
 #endif
@@ -2284,11 +2284,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	dhd->timer.function = dhd_watchdog;
     
 	/* Initialize thread based operation and lock */
-#if (LINUX_VERSION_CODE >=  KERNEL_VERSION(2, 6, 38))
-	mutex_init(&dhd->sdsem);
-#else
-	init_MUTEX(&dhd->sdsem);
-#endif
 	if ((dhd_watchdog_prio >= 0) && (dhd_dpc_prio >= 0)) {
 		dhd->threads_only = TRUE;
 	}
