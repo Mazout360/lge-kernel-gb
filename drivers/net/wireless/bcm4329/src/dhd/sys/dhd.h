@@ -49,11 +49,9 @@
 #include <linux/ethtool.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
-
-#ifdef CONFIG_HAS_WAKELOCK
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_HAS_WAKELOCK)
 #include <linux/wakelock.h>
-#endif 
-
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined (CONFIG_HAS_WAKELOCK) */
 /* The kernel threading is sdio-specific */
 #else /* LINUX */
 #define ENOMEM		1
@@ -169,10 +167,9 @@ typedef struct dhd_pub {
 	wl_country_t dhd_cspec;		/* Current Locale info */
 	char eventmask[WL_EVENTING_MASK_LEN];
     
-#ifdef CONFIG_HAS_WAKELOCK
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_HAS_WAKELOCK)
 	struct wake_lock 	wakelock[WAKE_LOCK_MAX];
-#endif 
-    
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined (CONFIG_HAS_WAKELOCK) */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
 	struct mutex 	wl_start_stop_lock; /* lock/unlock for Android start/stop */
 	struct mutex 	wl_softap_lock;		 /* lock/unlock for any SoftAP/STA settings */
@@ -187,7 +184,7 @@ typedef struct dhd_pub {
 int retry = 0; \
 smp_mb(); \
 while (dhd_mmc_suspend && retry++ != b) { \
-wait_event_timeout(a, FALSE, 3 * HZ); \
+wait_event_timeout(a, FALSE, HZ/100); \
 } \
 } 	while (0)
 // #define DHD_PM_RESUME_WAIT(a) 			_DHD_PM_RESUME_WAIT(a, 30)
@@ -200,7 +197,7 @@ wait_event_timeout(a, FALSE, 3 * HZ); \
 #define SPINWAIT_SLEEP(a, exp, us) do { \
 uint countdown = (us) + 9999; \
 while ((exp) && (countdown >= 10000)) { \
-wait_event_interruptible_timeout(a, FALSE, 3 * HZ); \
+wait_event_interruptible_timeout(a, FALSE, HZ/100); \
 countdown -= 10000; \
 } \
 } while (0)
@@ -360,7 +357,7 @@ void dhd_osl_detach(osl_t *osh);
  * Returned structure should have bus and prot pointers filled in.
  * bus_hdrlen specifies required headroom for bus module header.
  */
-extern dhd_pub_t *dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen, void *dev);
+extern dhd_pub_t *dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen);
 extern int dhd_net_attach(dhd_pub_t *dhdp, int idx);
 
 /* Indication from bus module regarding removal/absence of dongle */
