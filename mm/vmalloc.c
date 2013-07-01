@@ -2249,7 +2249,7 @@ static unsigned long pvm_determine_end(struct vmap_area **pnext,
  */
 struct vm_struct **pcpu_get_vm_areas(const unsigned long *offsets,
 				     const size_t *sizes, int nr_vms,
-				     size_t align, gfp_t gfp_mask)
+				     size_t align)
 {
 	const unsigned long vmalloc_start = ALIGN(VMALLOC_START, align);
 	const unsigned long vmalloc_end = VMALLOC_END & ~(align - 1);
@@ -2258,8 +2258,6 @@ struct vm_struct **pcpu_get_vm_areas(const unsigned long *offsets,
 	int area, area2, last_area, term_area;
 	unsigned long base, start, end, last_end;
 	bool purged = false;
-
-	gfp_mask &= GFP_RECLAIM_MASK;
 
 	/* verify parameters and allocate data structures */
 	BUG_ON(align & ~PAGE_MASK || !is_power_of_2(align));
@@ -2293,14 +2291,14 @@ struct vm_struct **pcpu_get_vm_areas(const unsigned long *offsets,
 		return NULL;
 	}
 
-	vms = kzalloc(sizeof(vms[0]) * nr_vms, gfp_mask);
-	vas = kzalloc(sizeof(vas[0]) * nr_vms, gfp_mask);
+	vms = kzalloc(sizeof(vms[0]) * nr_vms, GFP_KERNEL);
+    vas = kzalloc(sizeof(vas[0]) * nr_vms, GFP_KERNEL);
 	if (!vas || !vms)
 		goto err_free2;
 
 	for (area = 0; area < nr_vms; area++) {
-		vas[area] = kzalloc(sizeof(struct vmap_area), gfp_mask);
-		vms[area] = kzalloc(sizeof(struct vm_struct), gfp_mask);
+		vas[area] = kzalloc(sizeof(struct vmap_area), GFP_KERNEL);
+        vms[area] = kzalloc(sizeof(struct vm_struct), GFP_KERNEL);
 		if (!vas[area] || !vms[area])
 			goto err_free;
 	}

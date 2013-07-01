@@ -18,6 +18,7 @@
 #include <linux/tracepoint.h>
 
 #include <asm/local.h>
+#include <linux/percpu.h>
 #include <asm/module.h>
 
 #include <trace/events/module.h>
@@ -327,9 +328,12 @@ struct module
 	struct module_notes_attrs *notes_attrs;
 #endif
 
+#ifdef CONFIG_SMP
 	/* Per-cpu data. */
-	void *percpu;
-
+	void __percpu *percpu;
+    unsigned int percpu_size;
+#endif
+    
 	/* The command line arguments (may be mangled).  People like
 	   keeping pointers to this stuff */
 	char *args;
@@ -361,11 +365,10 @@ struct module
 	/* Destruction function. */
 	void (*exit)(void);
 
-#ifdef CONFIG_SMP
-	char *refptr;
-#else
-	local_t ref;
-#endif
+    struct module_ref {
+        unsigned int incs;
+        unsigned int decs;
+    } *refptr;
 #endif
 
 #ifdef CONFIG_CONSTRUCTORS
@@ -391,6 +394,7 @@ static inline int module_is_live(struct module *mod)
 struct module *__module_text_address(unsigned long addr);
 struct module *__module_address(unsigned long addr);
 bool is_module_address(unsigned long addr);
+bool is_module_percpu_address(unsigned long addr);
 bool is_module_text_address(unsigned long addr);
 
 static inline int within_module_core(unsigned long addr, struct module *mod)
@@ -452,25 +456,16 @@ void __symbol_put(const char *symbol);
 #define symbol_put(x) __symbol_put(MODULE_SYMBOL_PREFIX #x)
 void symbol_put_addr(void *addr);
 
-static inline local_t *__module_ref_addr(struct module *mod, int cpu)
-{
-#ifdef CONFIG_SMP
-	return (local_t *) (mod->refptr + per_cpu_offset(cpu));
-#else
-	return &mod->ref;
-#endif
-}
-
 /* Sometimes we know we already have a refcount, and it's easier not
    to handle the error case (which only happens with rmmod --wait). */
 static inline void __module_get(struct module *module)
 {
 	if (module) {
-		unsigned int cpu = get_cpu();
-		local_inc(__module_ref_addr(module, cpu));
+		preempt_disable();
+        __this_cpu_inc(module->refptr->incs);
 		trace_module_get(module, _THIS_IP_,
-				 local_read(__module_ref_addr(module, cpu)));
-		put_cpu();
+                    __this_cpu_read(module->refptr->incs));
+        preempt_enable();
 	}
 }
 
@@ -479,15 +474,14 @@ static inline int try_module_get(struct module *module)
 	int ret = 1;
 
 	if (module) {
-		unsigned int cpu = get_cpu();
+		preempt_disable();
 		if (likely(module_is_live(module))) {
-			local_inc(__module_ref_addr(module, cpu));
+			__this_cpu_inc(module->refptr->incs);
 			trace_module_get(module, _THIS_IP_,
-				local_read(__module_ref_addr(module, cpu)));
-		}
-		else
+                        __this_cpu_read(module->refptr->incs));
+        } else
 			ret = 0;
-		put_cpu();
+		preempt_enable();
 	}
 	return ret;
 }
@@ -567,6 +561,11 @@ static inline struct module *__module_text_address(unsigned long addr)
 static inline bool is_module_address(unsigned long addr)
 {
 	return false;
+}
+
+static inline bool is_module_percpu_address(unsigned long addr)
+{
+    return false;
 }
 
 static inline bool is_module_text_address(unsigned long addr)

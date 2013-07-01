@@ -161,7 +161,8 @@ struct vm_area_struct {
 	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
 	 * or brk vma (with NULL file) can only be in an anon_vma list.
 	 */
-	struct list_head anon_vma_node;	/* Serialized by anon_vma->lock */
+	struct list_head anon_vma_chain; /* Serialized by mmap_sem &
+                                      * page_table_lock */
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
@@ -179,6 +180,9 @@ struct vm_area_struct {
 #endif
 #ifdef CONFIG_NUMA
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
+#endif
+#ifdef CONFIG_UKSM
+    struct vma_slot *uksm_vma_slot;
 #endif
 };
 
@@ -283,7 +287,7 @@ struct mm_struct {
 	struct core_state *core_state; /* coredumping support */
 #ifdef CONFIG_AIO
 	spinlock_t		ioctx_lock;
-	struct hlist_head	ioctx_list;
+	struct hlist_head  ioctx_list;
 #endif
 #ifdef CONFIG_MM_OWNER
 	/*

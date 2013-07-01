@@ -144,6 +144,7 @@ extern void vfp_sync_state(struct thread_info *thread);
 #define TIF_FREEZE		19
 #define TIF_RESTORE_SIGMASK	20
 
+#define TIF_MM_RELEASED    22  /* task MM has been released */
 #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1 << TIF_NEED_RESCHED)
 #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)

@@ -10,6 +10,7 @@
 #include <linux/cpuidle.h>
 #include <linux/sysfs.h>
 #include <linux/cpu.h>
+#include <linux/slab.h>
 
 #include "cpuidle.h"
 

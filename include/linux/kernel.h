@@ -210,6 +210,12 @@ static inline int __must_check kstrtoul(const char *s, unsigned int base, unsign
         else
             return _kstrtoul(s, base, res);
 }
+
+int __must_check kstrtou16(const char *s, unsigned int base, u16 *res);
+int __must_check kstrtos16(const char *s, unsigned int base, s16 *res);
+int __must_check kstrtou8(const char *s, unsigned int base, u8 *res);
+int __must_check kstrtos8(const char *s, unsigned int base, s8 *res);
+
 extern unsigned long simple_strtoul(const char *,char **,unsigned int);
 extern long simple_strtol(const char *,char **,unsigned int);
 extern unsigned long long simple_strtoull(const char *,char **,unsigned int);
@@ -815,6 +821,13 @@ struct sysinfo {
 #define NUMA_BUILD 1
 #else
 #define NUMA_BUILD 0
+#endif
+
+/* This helps us avoid #ifdef CONFIG_COMPACTION */
+#ifdef CONFIG_COMPACTION
+#define COMPACTION_BUILD 1
+#else
+#define COMPACTION_BUILD 0
 #endif
 
 /* Rebuild everything on CONFIG_FTRACE_MCOUNT_RECORD */

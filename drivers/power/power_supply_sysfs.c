@@ -12,6 +12,7 @@
  */
 
 #include <linux/ctype.h>
+#include <linux/slab.h>
 #include <linux/power_supply.h>
 
 #include "power_supply.h"

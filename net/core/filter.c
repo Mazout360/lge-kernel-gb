@@ -335,6 +335,9 @@ load_b:
 		case SKF_AD_CPU:
 			A = raw_smp_processor_id();
 			continue;
+        case BPF_S_ANC_ALU_XOR_X:
+            A ^= X;
+            continue;
 		case SKF_AD_NLATTR: {
 			struct nlattr *nla;
 

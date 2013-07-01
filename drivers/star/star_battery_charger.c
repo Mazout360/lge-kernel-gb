@@ -33,6 +33,7 @@
 #include <linux/wakelock.h>
 #include <linux/time.h>
 #include <linux/rtc.h>
+#include <linux/slab.h>
 
 #include "nvcommon.h"
 #include "nvos.h"

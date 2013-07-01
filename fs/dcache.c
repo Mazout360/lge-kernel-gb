@@ -33,6 +33,7 @@
 #include <linux/bootmem.h>
 #include <linux/fs_struct.h>
 #include <linux/hardirq.h>
+#include <linux/bit_spinlock.h>
 #include "internal.h"
 
 int sysctl_vfs_cache_pressure __read_mostly = 200;
@@ -1464,10 +1465,6 @@ int d_validate(struct dentry *dentry, struct dentry *dparent)
 {
 	struct hlist_head *base;
 	struct hlist_node *lhp;
-
-	/* Check whether the ptr might be valid at all.. */
-	if (!kmem_ptr_validate(dentry_cache, dentry))
-		goto out;
 
 	if (dentry->d_parent != dparent)
 		goto out;

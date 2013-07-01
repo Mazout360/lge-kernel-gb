@@ -15,6 +15,7 @@
 #include <linux/compiler.h>
 #include <linux/errno.h>
 #include <linux/list.h>
+#include <linux/lockdep.h>
 #include <asm/atomic.h>
 
 struct kobject;
@@ -29,7 +30,22 @@ struct attribute {
 	const char		*name;
 	struct module		*owner;
 	mode_t			mode;
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+    struct lock_class_key  *key;
+    struct lock_class_key  skey;
+#endif
 };
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#define sysfs_attr_init(attr)        \
+do {              \
+    static struct lock_class_key __key;    \
+                  \
+    (attr)->key = &__key;        \
+} while(0)
+#else
+#define sysfs_attr_init(attr) do {} while(0)
+#endif
 
 struct attribute_group {
 	const char		*name;
@@ -73,6 +89,8 @@ struct bin_attribute {
 	int (*mmap)(struct kobject *, struct bin_attribute *attr,
 		    struct vm_area_struct *vma);
 };
+
+#define sysfs_bin_attr_init(bin_attr) sysfs_attr_init(&bin_attr->attr)
 
 struct sysfs_ops {
 	ssize_t	(*show)(struct kobject *, struct attribute *,char *);
@@ -122,6 +140,10 @@ int sysfs_add_file_to_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
 void sysfs_remove_file_from_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
+int sysfs_merge_group(struct kobject *kobj,
+                    const struct attribute_group *grp);
+void sysfs_unmerge_group(struct kobject *kobj,
+                    const struct attribute_group *grp);
 
 void sysfs_notify(struct kobject *kobj, const char *dir, const char *attr);
 void sysfs_notify_dirent(struct sysfs_dirent *sd);
@@ -241,6 +263,17 @@ static inline int sysfs_add_file_to_group(struct kobject *kobj,
 
 static inline void sysfs_remove_file_from_group(struct kobject *kobj,
 		const struct attribute *attr, const char *group)
+{
+}
+
+static inline int sysfs_merge_group(struct kobject *kobj,
+                                    const struct attribute_group *grp)
+{
+    return 0;
+}
+
+static inline void sysfs_unmerge_group(struct kobject *kobj,
+                                        const struct attribute_group *grp)
 {
 }
 

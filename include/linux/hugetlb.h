@@ -11,6 +11,7 @@ struct user_struct;
 #include <linux/mempolicy.h>
 #include <linux/shm.h>
 #include <asm/tlbflush.h>
+#include <linux/hugetlb_inline.h>
 
 struct hugepage_subpool {
 	spinlock_t lock;
@@ -22,11 +23,6 @@ struct hugepage_subpool *hugepage_new_subpool(long nr_blocks);
 void hugepage_put_subpool(struct hugepage_subpool *spool);
 
 int PageHuge(struct page *page);
-
-static inline int is_vm_hugetlb_page(struct vm_area_struct *vma)
-{
-	return vma->vm_flags & VM_HUGETLB;
-}
 
 void reset_vma_resv_huge_pages(struct vm_area_struct *vma);
 int hugetlb_sysctl_handler(struct ctl_table *, int, void __user *, size_t *, loff_t *);
@@ -86,11 +82,6 @@ static inline int PageHuge(struct page *page)
 	return 0;
 }
 
-static inline int is_vm_hugetlb_page(struct vm_area_struct *vma)
-{
-	return 0;
-}
-
 static inline void reset_vma_resv_huge_pages(struct vm_area_struct *vma)
 {
 }
@@ -117,6 +108,7 @@ static inline void hugetlb_report_meminfo(struct seq_file *m)
 #define is_hugepage_only_range(mm, addr, len)	0
 #define hugetlb_free_pgd_range(tlb, addr, end, floor, ceiling) ({BUG(); 0; })
 #define hugetlb_fault(mm, vma, addr, flags)	({ BUILD_BUG(); 0; })
+#define huge_pte_offset(mm, address)  0
 
 #define hugetlb_change_protection(vma, address, end, newprot)
 
@@ -313,6 +305,11 @@ static inline struct hstate *page_hstate(struct page *page)
 	return size_to_hstate(PAGE_SIZE << compound_order(page));
 }
 
+static inline unsigned hstate_index_to_shift(unsigned index)
+{
+    return hstates[index].order + PAGE_SHIFT;
+}
+
 #else
 struct hstate {};
 #define alloc_bootmem_huge_page(h) NULL
@@ -329,6 +326,7 @@ static inline unsigned int pages_per_huge_page(struct hstate *h)
 {
 	return 1;
 }
+#define hstate_index_to_shift(index) 0
 #endif
 
 #endif /* _LINUX_HUGETLB_H */

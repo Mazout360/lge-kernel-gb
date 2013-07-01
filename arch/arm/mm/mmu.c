@@ -803,18 +803,6 @@ static void __init sanity_check_meminfo(void)
 			 * rather difficult.
 			 */
 			reason = "with VIPT aliasing cache";
-#ifdef CONFIG_SMP
-		} else if (tlb_ops_need_broadcast()) {
-			/*
-			 * kmap_high needs to occasionally flush TLB entries,
-			 * however, if the TLB entries need to be broadcast
-			 * we may deadlock:
-			 *  kmap_high(irqs off)->flush_all_zero_pkmaps->
-			 *  flush_tlb_kernel_range->smp_call_function_many
-			 *   (must not be called with irqs off)
-			 */
-			reason = "without hardware TLB ops broadcasting";
-#endif
 		}
 		if (reason) {
 			printk(KERN_CRIT "HIGHMEM is not supported %s, ignoring high memory\n",

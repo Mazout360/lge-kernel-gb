@@ -20,6 +20,7 @@
 #include <linux/sched.h>
 #include <linux/xattr.h>
 #include <linux/security.h>
+#include <linux/slab.h>
 #include "sysfs.h"
 
 extern struct super_block * sysfs_sb;

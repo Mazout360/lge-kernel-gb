@@ -1722,6 +1722,7 @@ int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk)
 				goto out;
 			}
 		} else if (!capable(CAP_SYS_ADMIN)) {
+#ifndef CONFIG_ZRAM_FOR_ANDROID
 			const struct cred *cred = current_cred(), *tcred;
 
 			/* No can_attach() - check perms generically */
@@ -1730,6 +1731,7 @@ int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk)
 			    cred->euid != tcred->suid) {
 				return -EACCES;
 			}
+#endif
 		}
 	}
 

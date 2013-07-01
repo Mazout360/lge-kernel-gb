@@ -287,7 +287,6 @@ config TOUCHSCREEN_TEGRA_ODM
 
 config TOUCHSCREEN_ANDROID_VIRTUALKEYS
 	boolean "Support userspace-managed virtual keys on android"
-	depends on HACKFEST
 	default y
 	help
 	  Replaces the direct key events with a sysfs file with the key coordinates

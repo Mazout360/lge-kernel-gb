@@ -28,6 +28,7 @@
 #include <linux/hrtimer.h>
 #include <linux/cpu.h>
 #include <linux/io.h>
+#include <linux/slab.h>
 #include <linux/tick.h>
 #include <linux/interrupt.h>
 #include <mach/iomap.h>

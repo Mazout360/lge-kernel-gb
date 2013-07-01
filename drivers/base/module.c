@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/string.h>
+#include <linux/slab.h>
 #include "base.h"
 
 static char *make_driver_name(struct device_driver *drv)

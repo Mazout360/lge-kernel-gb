@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <linux/syscalls.h>
 #include <linux/timer.h> /* 20100802  */
+#include <linux/slab.h>
 
 struct keyreset_state {
 	struct input_handler input_handler;

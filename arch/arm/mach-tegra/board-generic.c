@@ -23,6 +23,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/pda_power.h>
 #include <linux/io.h>
+#include <linux/slab.h>
 #include <linux/usb/android_composite.h>
 #include <linux/usb/f_accessory.h>
 

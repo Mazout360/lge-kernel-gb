@@ -239,7 +239,7 @@ int device_attach(struct device *dev)
 {
 	int ret = 0;
 
-	down(&dev->sem);
+	device_lock(dev);
 	if (dev->driver) {
 		ret = device_bind_driver(dev);
 		if (ret == 0)
@@ -253,7 +253,7 @@ int device_attach(struct device *dev)
 		ret = bus_for_each_drv(dev->bus, NULL, dev, __device_attach);
 		pm_runtime_put_sync(dev);
 	}
-	up(&dev->sem);
+	device_unlock(dev);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(device_attach);
@@ -276,13 +276,13 @@ static int __driver_attach(struct device *dev, void *data)
 		return 0;
 
 	if (dev->parent)	/* Needed for USB */
-		down(&dev->parent->sem);
-	down(&dev->sem);
+		device_lock(dev->parent);
+    device_lock(dev);
 	if (!dev->driver)
 		driver_probe_device(drv, dev);
-	up(&dev->sem);
+	device_unlock(dev);
 	if (dev->parent)
-		up(&dev->parent->sem);
+		device_unlock(dev->parent);
 
 	return 0;
 }
@@ -352,9 +352,9 @@ void device_release_driver(struct device *dev)
 	 * within their ->remove callback for the same device, they
 	 * will deadlock right here.
 	 */
-	down(&dev->sem);
+	device_lock(dev);
 	__device_release_driver(dev);
-	up(&dev->sem);
+	device_unlock(dev);
 }
 EXPORT_SYMBOL_GPL(device_release_driver);
 
@@ -381,13 +381,13 @@ void driver_detach(struct device_driver *drv)
 		spin_unlock(&drv->p->klist_devices.k_lock);
 
 		if (dev->parent)	/* Needed for USB */
-			down(&dev->parent->sem);
-		down(&dev->sem);
+			device_lock(dev->parent);
+        device_lock(dev);
 		if (dev->driver == drv)
 			__device_release_driver(dev);
-		up(&dev->sem);
+		device_unlock(dev);
 		if (dev->parent)
-			up(&dev->parent->sem);
+			device_unlock(dev->parent);
 		put_device(dev);
 	}
 }

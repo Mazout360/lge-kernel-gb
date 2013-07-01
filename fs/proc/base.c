@@ -1085,7 +1085,23 @@ static ssize_t oom_adjust_write(struct file *file, const char __user *buf,
 		put_task_struct(task);
 		return -EACCES;
 	}
+    
+    task_lock(task);
+    if (!task->mm) {
+        task_unlock(task);
+        unlock_task_sighand(task, &flags);
+        put_task_struct(task);
+        return -EINVAL;
+    }
 
+    /*
+     * Warn that /proc/pid/oom_adj is deprecated, see
+     * Documentation/feature-removal-schedule.txt.
+     */
+    printk_once(KERN_WARNING "%s (%d): /proc/%d/oom_adj is deprecated, "
+                    "please use /proc/%d/oom_score_adj instead.\n",
+                    current->comm, task_pid_nr(current),
+                    task_pid_nr(task), task_pid_nr(task));
 	task->signal->oom_adj = oom_adjust;
 
     /*
@@ -1097,7 +1113,7 @@ static ssize_t oom_adjust_write(struct file *file, const char __user *buf,
     else
         task->signal->oom_score_adj = (oom_adjust * OOM_SCORE_ADJ_MAX) /
         -OOM_DISABLE;
-    
+    task_unlock(task);
 	unlock_task_sighand(task, &flags);
 	put_task_struct(task);
 
@@ -1185,14 +1201,23 @@ static ssize_t oom_score_adj_write(struct file *file, const char __user *buf,
 		put_task_struct(task);
 		return -ESRCH;
 	}
-	if (oom_score_adj < task->signal->oom_score_adj &&
+	if (oom_score_adj < task->signal->oom_score_adj_min &&
         !capable(CAP_SYS_RESOURCE)) {
 		unlock_task_sighand(task, &flags);
 		put_task_struct(task);
 		return -EACCES;
 	}
     
+    task_lock(task);
+    if (!task->mm) {
+        task_unlock(task);
+        unlock_task_sighand(task, &flags);
+        put_task_struct(task);
+        return -EINVAL;
+    }
 	task->signal->oom_score_adj = oom_score_adj;
+    if (has_capability_noaudit(current, CAP_SYS_RESOURCE))
+        task->signal->oom_score_adj_min = oom_score_adj;
 	/*
 	 * Scale /proc/pid/oom_adj appropriately ensuring that OOM_DISABLE is
 	 * always attainable.
@@ -1202,6 +1227,7 @@ static ssize_t oom_score_adj_write(struct file *file, const char __user *buf,
 	else
 		task->signal->oom_adj = (oom_score_adj * OOM_ADJUST_MAX) /
         OOM_SCORE_ADJ_MAX;
+    task_unlock(task);
 	unlock_task_sighand(task, &flags);
 	put_task_struct(task);
 	return count;
@@ -2775,7 +2801,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",      S_IRUGO, proc_smaps_operations),
-	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
+	REG("pagemap",    S_IRUGO, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY
 	DIR("attr",       S_IRUGO|S_IXUGO, proc_attr_dir_inode_operations, proc_attr_dir_operations),
@@ -3114,7 +3140,7 @@ static const struct pid_entry tid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",     S_IRUGO, proc_smaps_operations),
-	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
+	REG("pagemap",    S_IRUGO, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY
 	DIR("attr",      S_IRUGO|S_IXUGO, proc_attr_dir_inode_operations, proc_attr_dir_operations),

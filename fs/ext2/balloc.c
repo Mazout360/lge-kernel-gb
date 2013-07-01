@@ -16,6 +16,7 @@
 #include <linux/sched.h>
 #include <linux/buffer_head.h>
 #include <linux/capability.h>
+#include <linux/slab.h>
 
 /*
  * balloc.c contains the blocks allocation and deallocation routines

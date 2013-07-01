@@ -65,6 +65,9 @@
 #include <linux/perf_event.h>
 #include <linux/posix-timers.h>
 #include <linux/signalfd.h>
+#include <linux/khugepaged.h>
+#include <linux/oom.h>
+#include <linux/uksm.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -338,6 +341,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	retval = ksm_fork(mm, oldmm);
 	if (retval)
 		goto out;
+    retval = khugepaged_fork(mm, oldmm);
+    if (retval)
+        goto out;
 
 	prev = NULL;
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
@@ -357,19 +363,21 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 				goto fail_nomem;
 			charge = len;
 		}
-		tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
+		tmp = kmem_cache_zalloc(vm_area_cachep, GFP_KERNEL);
 		if (!tmp)
 			goto fail_nomem;
 		*tmp = *mpnt;
+        INIT_LIST_HEAD(&tmp->anon_vma_chain);
 		pol = mpol_dup(vma_policy(mpnt));
 		retval = PTR_ERR(pol);
 		if (IS_ERR(pol))
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
+        if (anon_vma_fork(tmp, mpnt))
+            goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~VM_LOCKED;
 		tmp->vm_mm = mm;
 		tmp->vm_next = tmp->vm_prev = NULL;
-		anon_vma_link(tmp);
 		file = tmp->vm_file;
 		if (file) {
 			struct inode *inode = file->f_path.dentry->d_inode;
@@ -409,6 +417,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		rb_link = &tmp->vm_rb.rb_right;
 		rb_parent = &tmp->vm_rb;
 
+        uksm_vma_add_new(tmp);
 		mm->map_count++;
 		retval = copy_page_range(mm, oldmm, mpnt);
 
@@ -426,6 +435,8 @@ out:
 	flush_tlb_mm(oldmm);
 	up_write(&oldmm->mmap_sem);
 	return retval;
+fail_nomem_anon_vma_fork:
+    mpol_put(pol);
 fail_nomem_policy:
 	kmem_cache_free(vm_area_cachep, tmp);
 fail_nomem:
@@ -539,14 +550,16 @@ EXPORT_SYMBOL_GPL(__mmdrop);
 /*
  * Decrement the use count and release all resources for an mm.
  */
-void mmput(struct mm_struct *mm)
+int mmput(struct mm_struct *mm)
 {
+    int mm_freed = 0;
 	might_sleep();
 
 	if (atomic_dec_and_test(&mm->mm_users)) {
 		exit_aio(mm);
 		ksm_exit(mm);
 		exit_mmap(mm);
+        khugepaged_exit(mm); /* must run before exit_mmap */
 		set_mm_exe_file(mm, NULL);
 		if (!list_empty(&mm->mmlist)) {
 			spin_lock(&mmlist_lock);
@@ -557,7 +570,9 @@ void mmput(struct mm_struct *mm)
 		if (mm->binfmt)
 			module_put(mm->binfmt->module);
 		mmdrop(mm);
+        mm_freed = 1;
 	}
+    return mm_freed;
 }
 EXPORT_SYMBOL_GPL(mmput);
 
@@ -947,6 +962,7 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 
 	sig->oom_adj = current->signal->oom_adj;
     sig->oom_score_adj = current->signal->oom_score_adj;
+    sig->oom_score_adj_min = current->signal->oom_score_adj_min;
 
 	return 0;
 }
@@ -955,11 +971,10 @@ static void copy_flags(unsigned long clone_flags, struct task_struct *p)
 {
 	unsigned long new_flags = p->flags;
 
-	new_flags &= ~PF_SUPERPRIV;
+	new_flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER);
 	new_flags |= PF_FORKNOEXEC;
 	new_flags |= PF_STARTING;
 	p->flags = new_flags;
-	clear_freeze_flag(p);
 }
 
 SYSCALL_DEFINE1(set_tid_address, int __user *, tidptr)

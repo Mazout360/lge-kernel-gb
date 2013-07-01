@@ -8,6 +8,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/slab.h>
 #include <linux/module.h>
 
 #include "base.h"

@@ -71,11 +71,13 @@
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #include <linux/ftrace.h>
+#include <linux/sched.h>
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
 
 #include "sched_cpupri.h"
+#include "workqueue_sched.h"
 #include "sched_autogroup.h"
 
 #define CREATE_TRACE_POINTS
@@ -1976,6 +1978,50 @@ static void update_avg(u64 *avg, u64 sample)
 	*avg += diff >> 3;
 }
 
+static inline void ttwu_activate(struct task_struct *p, struct rq *rq,
+                                 bool is_sync, bool is_migrate, bool is_local,
+                                 int wakeup)
+{
+	schedstat_inc(p, se.nr_wakeups);
+	if (is_sync)
+		schedstat_inc(p, se.nr_wakeups_sync);
+	if (is_migrate)
+		schedstat_inc(p, se.nr_wakeups_migrate);
+	if (is_local)
+		schedstat_inc(p, se.nr_wakeups_local);
+	else
+		schedstat_inc(p, se.nr_wakeups_remote);
+    
+	activate_task(rq, p, 1);
+}
+
+static inline void ttwu_post_activation(struct task_struct *p, struct rq *rq,
+                                        int wake_flags, bool success)
+{
+	trace_sched_wakeup(rq, p, success);
+	check_preempt_curr(rq, p, wake_flags);
+    
+	p->state = TASK_RUNNING;
+#ifdef CONFIG_SMP
+	if (p->sched_class->task_woken)
+		p->sched_class->task_woken(rq, p);
+    
+	if (unlikely(rq->idle_stamp)) {
+		u64 delta = rq->clock - rq->idle_stamp;
+		u64 max = 2*sysctl_sched_migration_cost;
+        
+		if (delta > max)
+			rq->avg_idle = max;
+		else
+			update_avg(&rq->avg_idle, delta);
+		rq->idle_stamp = 0;
+	}
+#endif
+    /* if a worker is waking up, notify workqueue */
+   // if ((p->flags & PF_WQ_WORKER) && success)
+     //   wq_worker_waking_up(p, cpu_of(rq));
+}
+
 static void
 enqueue_task(struct rq *rq, struct task_struct *p, int wakeup, bool head)
 {
@@ -2583,16 +2629,8 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
 
 out_activate:
 #endif /* CONFIG_SMP */
-	schedstat_inc(p, se.nr_wakeups);
-	if (wake_flags & WF_SYNC)
-		schedstat_inc(p, se.nr_wakeups_sync);
-	if (orig_cpu != cpu)
-		schedstat_inc(p, se.nr_wakeups_migrate);
-	if (cpu == this_cpu)
-		schedstat_inc(p, se.nr_wakeups_local);
-	else
-		schedstat_inc(p, se.nr_wakeups_remote);
-	activate_task(rq, p, 1);
+	ttwu_activate(p, rq, wake_flags & WF_SYNC, orig_cpu != cpu,
+                cpu == this_cpu, 1);
 	success = 1;
 
 	/*
@@ -2612,30 +2650,44 @@ out_activate:
 	}
 
 out_running:
-	trace_sched_wakeup(rq, p, success);
-	check_preempt_curr(rq, p, wake_flags);
+	ttwu_post_activation(p, rq, wake_flags, success);
 
-	p->state = TASK_RUNNING;
-#ifdef CONFIG_SMP
-	if (p->sched_class->task_woken)
-		p->sched_class->task_woken(rq, p);
-
-	if (unlikely(rq->idle_stamp)) {
-		u64 delta = rq->clock - rq->idle_stamp;
-		u64 max = 2*sysctl_sched_migration_cost;
-
-		if (delta > max)
-			rq->avg_idle = max;
-		else
-			update_avg(&rq->avg_idle, delta);
-		rq->idle_stamp = 0;
-	}
-#endif
 out:
 	task_rq_unlock(rq, &flags);
 	put_cpu();
 
 	return success;
+}
+
+/**
+ * try_to_wake_up_local - try to wake up a local task with rq lock held
+ * @p: the thread to be awakened
+ *
+ * Put @p on the run-queue if it's not alredy there.  The caller must
+ * ensure that this_rq() is locked, @p is bound to this_rq() and not
+ * the current task.  this_rq() stays locked over invocation.
+ */
+static void try_to_wake_up_local(struct task_struct *p)
+{
+	struct rq *rq = task_rq(p);
+	bool success = false;
+    
+	BUG_ON(rq != this_rq());
+	BUG_ON(p == current);
+	lockdep_assert_held(&rq->lock);
+    
+	if (!(p->state & TASK_NORMAL))
+		return;
+    
+	if (!p->se.on_rq) {
+		if (likely(!task_running(rq, p))) {
+			schedstat_inc(rq, ttwu_count);
+			schedstat_inc(rq, ttwu_local);
+		}
+		ttwu_activate(p, rq, false, false, true, ENQUEUE_WAKEUP);
+		success = true;
+	}
+	ttwu_post_activation(p, rq, 0, success);
 }
 
 /**
@@ -3162,6 +3214,13 @@ unsigned long this_cpu_load(void)
 	return this->cpu_load[0];
 }
 
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+unsigned long this_cpu_loadx(int i)
+{
+    struct rq *this = this_rq();
+    return this->cpu_load[i];
+}
+#endif
 
 /* Variables and functions for calc_load */
 static atomic_long_t calc_load_tasks;
@@ -5487,7 +5546,7 @@ cputime_t task_utime(struct task_struct *p)
 	 */
 	temp = (u64)nsecs_to_cputime(p->se.sum_exec_runtime);
 
-	if (total) {
+	if (total && total == (__force u32) total) {
 		temp *= utime;
 		do_div(temp, total);
 	}
@@ -5528,7 +5587,7 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	total = cputime_add(cputime.utime, cputime.stime);
 	rtime = nsecs_to_cputime(cputime.sum_exec_runtime);
 
-	if (total) {
+	if (total && total == (__force u32) total) {
 		u64 temp = rtime;
 
 		temp *= cputime.utime;
@@ -5771,10 +5830,18 @@ need_resched_nonpreemptible:
 	clear_tsk_need_resched(prev);
 
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
-		if (unlikely(signal_pending_state(prev->state, prev)))
+		if (unlikely(signal_pending_state(prev->state, prev))) {
 			prev->state = TASK_RUNNING;
-		else
+		} else {
+          //  if (prev->flags & PF_WQ_WORKER) {
+             //   struct task_struct *to_wakeup;
+            
+               // to_wakeup = wq_worker_sleeping(prev, cpu);
+               // if (to_wakeup)
+                 //   try_to_wake_up_local(to_wakeup);
+          //  }
 			deactivate_task(rq, prev, 1);
+        }
 		switch_count = &prev->nvcsw;
 	}
 

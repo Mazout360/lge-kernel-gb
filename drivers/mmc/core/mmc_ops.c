@@ -11,6 +11,7 @@
 
 #include <linux/types.h>
 #include <linux/scatterlist.h>
+#include <linux/slab.h>
 
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>

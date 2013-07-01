@@ -915,6 +915,8 @@ static inline int unuse_pmd_range(struct vm_area_struct *vma, pud_t *pud,
 	pmd = pmd_offset(pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
+        if (unlikely(pmd_trans_huge(*pmd)))
+            continue;
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
 		ret = unuse_pte_range(vma, pmd, addr, next, entry, page);
@@ -1576,7 +1578,7 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
     
 	oom_score_adj = test_set_oom_score_adj(OOM_SCORE_ADJ_MAX);
 	err = try_to_unuse(type, false, 0);
-	test_set_oom_score_adj(oom_score_adj);
+	compare_swap_oom_score_adj(OOM_SCORE_ADJ_MAX, oom_score_adj);
     
 	if (err) {
 		/* re-insert swap space back into swap_list */
@@ -2053,7 +2055,9 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		swap_list.head = swap_list.next = type;
 	else
 		swap_info[prev]->next = type;
+#ifdef CONFIG_FRONTSWAP
 	frontswap_init(type);
+#endif
 	spin_unlock(&swap_lock);
 	mutex_unlock(&swapon_mutex);
 	error = 0;

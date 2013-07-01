@@ -45,6 +45,7 @@ enum vm_event_item { PGPGIN, PGPGOUT, PSWPIN, PSWPOUT,
 		PAGEOUTRUN, ALLOCSTALL, PGROTATED,
 #ifdef CONFIG_COMPACTION
 		COMPACTBLOCKS, COMPACTPAGES, COMPACTPAGEFAILED,
+    COMPACTSTALL, COMPACTFAIL, COMPACTSUCCESS,
 #endif
 #ifdef CONFIG_HUGETLB_PAGE
 		HTLB_BUDDY_PGALLOC, HTLB_BUDDY_PGALLOC_FAIL,
@@ -176,19 +177,19 @@ static inline unsigned long zone_page_state(struct zone *zone,
  * exactly accurate either.
  */
 static inline unsigned long zone_page_state_snapshot(struct zone *zone,
-					enum zone_stat_item item)
+                                                    enum zone_stat_item item)
 {
-	long x = atomic_long_read(&zone->vm_stat[item]);
-
+    long x = atomic_long_read(&zone->vm_stat[item]);
+    
 #ifdef CONFIG_SMP
-	int cpu;
-	for_each_online_cpu(cpu)
-		x += zone_pcp(zone, cpu)->vm_stat_diff[item];
+    int cpu;
+    for_each_online_cpu(cpu)
+    x += per_cpu_ptr(zone->pageset, cpu)->vm_stat_diff[item];
 
-	if (x < 0)
-		x = 0;
+    if (x < 0)
+        x = 0;
 #endif
-	return x;
+    return x;
 }
 
 extern unsigned long global_reclaimable_pages(void);
@@ -219,12 +220,12 @@ static inline unsigned long node_page_state(int node,
 		zone_page_state(&zones[ZONE_MOVABLE], item);
 }
 
-extern void zone_statistics(struct zone *, struct zone *);
+extern void zone_statistics(struct zone *, struct zone *, gfp_t gfp);
 
 #else
 
 #define node_page_state(node, item) global_page_state(item)
-#define zone_statistics(_zl,_z) do { } while (0)
+#define zone_statistics(_zl, _z, gfp) do { } while (0)
 
 #endif /* CONFIG_NUMA */
 
@@ -253,6 +254,10 @@ extern void dec_zone_state(struct zone *, enum zone_stat_item);
 extern void __dec_zone_state(struct zone *, enum zone_stat_item);
 
 void refresh_cpu_vm_stats(int);
+int calculate_pressure_threshold(struct zone *zone);
+int calculate_normal_threshold(struct zone *zone);
+void set_pgdat_percpu_threshold(pg_data_t *pgdat,
+                                int (*calculate_pressure)(struct zone *));
 #else /* CONFIG_SMP */
 
 /*
@@ -296,6 +301,8 @@ static inline void __dec_zone_page_state(struct page *page,
 #define inc_zone_page_state __inc_zone_page_state
 #define dec_zone_page_state __dec_zone_page_state
 #define mod_zone_page_state __mod_zone_page_state
+
+#define set_pgdat_percpu_threshold(pgdat, callback) { }
 
 static inline void refresh_cpu_vm_stats(int cpu) { }
 #endif

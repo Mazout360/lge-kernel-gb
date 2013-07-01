@@ -72,6 +72,11 @@
 #define CRYPTO_ALG_TESTED		0x00000400
 
 /*
+ * Set if the algorithm is an instance that is build from templates.
+ */
+#define CRYPTO_ALG_INSTANCE    0x00000800
+
+/*
  * Transform masks and values (for crt_flags).
  */
 #define CRYPTO_TFM_REQ_MASK		0x000fff00
@@ -338,6 +343,8 @@ struct crypto_alg {
  */
 int crypto_register_alg(struct crypto_alg *alg);
 int crypto_unregister_alg(struct crypto_alg *alg);
+int crypto_register_algs(struct crypto_alg *algs, int count);
+int crypto_unregister_algs(struct crypto_alg *algs, int count);
 
 /*
  * Algorithm query interface.

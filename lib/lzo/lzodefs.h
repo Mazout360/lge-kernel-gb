@@ -13,13 +13,13 @@
 
 
 #define COPY4(dst, src)	\
-		put_unaligned(get_unaligned((const u32 *)(src)), (u32 *)(dst))
+put_unaligned(get_unaligned((const u32 *)(src)), (u32 *)(dst))
 #if defined(__x86_64__)
 #define COPY8(dst, src)	\
-		put_unaligned(get_unaligned((const u64 *)(src)), (u64 *)(dst))
+put_unaligned(get_unaligned((const u64 *)(src)), (u64 *)(dst))
 #else
 #define COPY8(dst, src)	\
-		COPY4(dst, src); COPY4((dst) + 4, (src) + 4)
+COPY4(dst, src); COPY4((dst) + 4, (src) + 4)
 #endif
 
 #if defined(__BIG_ENDIAN) && defined(__LITTLE_ENDIAN)
@@ -29,7 +29,7 @@
 #define LZO_USE_CTZ32	1
 #elif defined(__i386__) || defined(__powerpc__)
 #define LZO_USE_CTZ32	1
-#else
+#elif defined(__arm__) && (__LINUX_ARM_ARCH__ >= 5)
 #define LZO_USE_CTZ32	1
 #endif
 
@@ -59,5 +59,5 @@
 #define D_HIGH		((D_MASK >> 1) + 1)
 
 #define DX2(p, s1, s2)	(((((size_t)((p)[2]) << (s2)) ^ (p)[1]) \
-							<< (s1)) ^ (p)[0])
+<< (s1)) ^ (p)[0])
 #define DX3(p, s1, s2, s3)	((DX2((p)+1, s2, s3) << (s1)) ^ (p)[0])

@@ -19,11 +19,25 @@
 
 extern pte_t *pkmap_page_table;
 
-#define ARCH_NEEDS_KMAP_HIGH_GET
-
 extern void *kmap_high(struct page *page);
-extern void *kmap_high_get(struct page *page);
 extern void kunmap_high(struct page *page);
+
+#define ARCH_NEEDS_KMAP_HIGH_GET
+#if defined(CONFIG_SMP) && defined(CONFIG_CPU_TLB_V6)
+#undef ARCH_NEEDS_KMAP_HIGH_GET
+#if defined(CONFIG_HIGHMEM) && defined(CONFIG_CPU_CACHE_VIVT)
+#error "The sum of features in your kernel config cannot be supported together"
+#endif
+#endif
+
+#ifdef ARCH_NEEDS_KMAP_HIGH_GET
+extern void *kmap_high_get(struct page *page);
+#else
+static inline void *kmap_high_get(struct page *page)
+{
+    return NULL;
+}
+#endif
 
 extern void *kmap_high_l1_vipt(struct page *page, pte_t *saved_pte);
 extern void kunmap_high_l1_vipt(struct page *page, pte_t saved_pte);

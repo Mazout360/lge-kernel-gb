@@ -20,6 +20,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include <linux/slab.h>
+
 #include "nvhost_hwctx.h"
 #include "nvhost_dev.h"
 

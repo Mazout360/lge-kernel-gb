@@ -29,6 +29,7 @@
 #include <linux/regulator/machine.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 
 #include <mach/nvrm_linux.h>
 #include <mach/regulator.h>

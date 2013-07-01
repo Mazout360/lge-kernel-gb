@@ -125,7 +125,7 @@ static int ll_open(struct hci_uart *hu)
 
 	BT_DBG("hu %p", hu);
 
-	ll = kzalloc(sizeof(*ll), GFP_ATOMIC);
+	ll = kzalloc(sizeof(*ll), GFP_KERNEL);
 	if (!ll)
 		return -ENOMEM;
 
@@ -367,7 +367,7 @@ static inline int ll_check_data_len(struct ll_struct *ll, int len)
 	ll->rx_skb   = NULL;
 	ll->rx_count = 0;
 
-	return 0;
+	return -ENOMEM;
 }
 
 /* Recv data */

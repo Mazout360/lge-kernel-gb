@@ -1,6 +1,7 @@
 #include <linux/i2c.h>
 #include <linux/miscdevice.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 
 #include "nvcommon.h"
 #include "nvodm_services.h"

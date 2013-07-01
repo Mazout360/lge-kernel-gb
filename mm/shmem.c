@@ -1043,8 +1043,12 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	info = SHMEM_I(inode);
 	if (info->flags & VM_LOCKED)
 		goto redirty;
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+    goto redirty;
+#else
 	if (!total_swap_pages)
 		goto redirty;
+#endif
 
 	/*
 	 * shmem_backing_dev_info's capabilities prevent regular writeback or

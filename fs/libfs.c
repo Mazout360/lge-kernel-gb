@@ -11,6 +11,7 @@
 #include <linux/exportfs.h>
 #include <linux/writeback.h>
 #include <linux/buffer_head.h>
+#include <linux/slab.h>
 
 #include <asm/uaccess.h>
 

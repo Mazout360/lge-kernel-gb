@@ -115,7 +115,7 @@
  * sure the page is locked and that nobody else uses it - or that usage
  * is safe.  The caller must hold the mapping's tree_lock.
  */
-void __remove_from_page_cache(struct page *page)
+void __delete_from_page_cache(struct page *page)
 {
 	struct address_space *mapping = page->mapping;
 
@@ -143,14 +143,35 @@ void __remove_from_page_cache(struct page *page)
 void remove_from_page_cache(struct page *page)
 {
 	struct address_space *mapping = page->mapping;
+    void (*freepage)(struct page *);
 
 	BUG_ON(!PageLocked(page));
 
+    freepage = mapping->a_ops->freepage;
 	spin_lock_irq(&mapping->tree_lock);
-	__remove_from_page_cache(page);
+	__delete_from_page_cache(page);
 	spin_unlock_irq(&mapping->tree_lock);
 	mem_cgroup_uncharge_cache_page(page);
+    
+    if (freepage)
+        freepage(page);
 }
+
+/**
+ * delete_from_page_cache - delete page from page cache
+ * @page: the page which the kernel is trying to remove from page cache
+ *
+ * This must be called only on pages that have
+ * been verified to be in the page cache and locked.
+ * It will never put the page into the free list,
+ * the caller has a reference on the page.
+ */
+void delete_from_page_cache(struct page *page)
+{
+    remove_from_page_cache(page);
+    page_cache_release(page);
+}
+EXPORT_SYMBOL(delete_from_page_cache);
 
 static int sync_page(void *word)
 {
@@ -482,9 +503,15 @@ EXPORT_SYMBOL_GPL(add_to_page_cache_lru);
 #ifdef CONFIG_NUMA
 struct page *__page_cache_alloc(gfp_t gfp)
 {
+    int n;
+    struct page *page;
+    
 	if (cpuset_do_page_mem_spread()) {
-		int n = cpuset_mem_spread_node();
-		return alloc_pages_exact_node(n, gfp, 0);
+		get_mems_allowed();
+        n = cpuset_mem_spread_node();
+        page = alloc_pages_exact_node(n, gfp, 0);
+        put_mems_allowed();
+        return page;
 	}
 	return alloc_pages(gfp, 0);
 }

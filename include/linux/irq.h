@@ -191,7 +191,7 @@ struct irq_desc {
 	unsigned int		irq_count;	/* For detecting broken IRQs */
 	unsigned long		last_unhandled;	/* Aging timer for unhandled count */
 	unsigned int		irqs_unhandled;
-	spinlock_t		lock;
+	spinlock_t    lock;
 #ifdef CONFIG_SMP
 	cpumask_var_t		affinity;
 	unsigned int		node;
@@ -230,6 +230,10 @@ extern struct irq_desc *irq_to_desc_alloc_node(unsigned int irq, int node);
  * Pick up the arch-dependent methods:
  */
 #include <asm/hw_irq.h>
+
+#ifndef NR_IRQS_LEGACY
+# define NR_IRQS_LEGACY 0
+#endif
 
 extern int setup_irq(unsigned int irq, struct irqaction *new);
 extern void remove_irq(unsigned int irq, struct irqaction *act);

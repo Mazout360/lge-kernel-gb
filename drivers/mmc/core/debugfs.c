@@ -11,6 +11,7 @@
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/stat.h>
+#include <linux/slab.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>

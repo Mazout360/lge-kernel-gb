@@ -36,6 +36,7 @@
 #include <linux/moduleparam.h>
 #include <linux/kthread.h>
 #include <linux/workqueue.h>
+#include <linux/slab.h>
 
 #include <asm/gpio.h>
 #include <asm/irq.h>

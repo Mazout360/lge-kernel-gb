@@ -73,17 +73,17 @@ struct row_queue_params {
 static const struct row_queue_params row_queues_def[] = {
     /* idling_enabled, quantum, is_urgent */
 	{true, 100, true},	/* ROWQ_PRIO_HIGH_READ */
-	{true, 100, true},	/* ROWQ_PRIO_REG_READ */
-	{false, 2, false},	/* ROWQ_PRIO_HIGH_SWRITE */
-	{false, 1, false},	/* ROWQ_PRIO_REG_SWRITE */
-	{false, 1, false},	/* ROWQ_PRIO_REG_WRITE */
-	{false, 1, false},	/* ROWQ_PRIO_LOW_READ */
-	{false, 1, false}	/* ROWQ_PRIO_LOW_SWRITE */
+    {true, 75, true},	/* ROWQ_PRIO_REG_READ */
+    {false, 5, false},	/* ROWQ_PRIO_HIGH_SWRITE */
+    {false, 4, false},	/* ROWQ_PRIO_REG_SWRITE */
+    {false, 4, false},	/* ROWQ_PRIO_REG_WRITE */
+    {false, 3, false},	/* ROWQ_PRIO_LOW_READ */
+    {false, 2, false}	/* ROWQ_PRIO_LOW_SWRITE */
 };
 
 /* Default values for idling on read queues (in msec) */
-#define ROW_IDLE_TIME_MSEC 5
-#define ROW_READ_FREQ_MSEC 20
+#define ROW_IDLE_TIME_MSEC 10
+#define ROW_READ_FREQ_MSEC 5
 
 /**
  * struct rowq_idling_data -  parameters for idling on the queue
@@ -276,6 +276,10 @@ static void row_add_request(struct request_queue *q,
 {
 	struct row_data *rd = (struct row_data *)q->elevator->elevator_data;
 	struct row_queue *rqueue = RQ_ROWQ(rq);
+    //unsigned long bv_page_flags = 0;
+    
+   // if (rq->bio && rq->bio->bi_io_vec && rq->bio->bi_io_vec->bv_page)
+     //   bv_page_flags = rq->bio->bi_io_vec->bv_page->flags;
     
 	list_add_tail(&rq->queuelist, &rqueue->fifo);
 	rd->nr_reqs[rq_data_dir(rq)]++;
@@ -286,9 +290,10 @@ static void row_add_request(struct request_queue *q,
 		if (delayed_work_pending(&rd->read_idle.idle_work))
 			(void)cancel_delayed_work(
                                       &rd->read_idle.idle_work);
-		if (ktime_to_ms(ktime_sub(ktime_get(),
+        if /*((bv_page_flags & (1L << PG_readahead)) ||*/
+		   (ktime_to_ms(ktime_sub(ktime_get(),
                                   rqueue->idle_data.last_insert_time)) <
-            rd->read_idle.freq) {
+            rd->read_idle.freq)/*)*/ {
 			rqueue->idle_data.begin_idling = true;
 			row_log_rowq(rd, rqueue->prio, "Enable idling");
 		} else {

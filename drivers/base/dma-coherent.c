@@ -4,6 +4,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
+#include <linux/slab.h>
 
 struct dma_coherent_mem {
 	void		*virt_base;

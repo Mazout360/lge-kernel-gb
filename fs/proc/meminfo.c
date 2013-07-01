@@ -87,6 +87,9 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		"SUnreclaim:     %8lu kB\n"
 		"KernelStack:    %8lu kB\n"
 		"PageTables:     %8lu kB\n"
+#ifdef CONFIG_UKSM
+        "KsmZeroPages:   %8lu kB\n"
+#endif
 #ifdef CONFIG_QUICKLIST
 		"Quicklists:     %8lu kB\n"
 #endif
@@ -100,6 +103,9 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		"VmallocChunk:   %8lu kB\n"
 #ifdef CONFIG_MEMORY_FAILURE
 		"HardwareCorrupted: %5lu kB\n"
+#endif
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+        "AnonHugePages:  %8lu kB\n"
 #endif
 		,
 		K(i.totalram),
@@ -128,7 +134,12 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		K(i.freeswap),
 		K(global_page_state(NR_FILE_DIRTY)),
 		K(global_page_state(NR_WRITEBACK)),
-		K(global_page_state(NR_ANON_PAGES)),
+        K(global_page_state(NR_ANON_PAGES)
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+          + global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
+            HPAGE_PMD_NR
+#endif
+        ),
 		K(global_page_state(NR_FILE_MAPPED)),
 		K(global_page_state(NR_SHMEM)),
 		K(global_page_state(NR_SLAB_RECLAIMABLE) +
@@ -137,6 +148,9 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		K(global_page_state(NR_SLAB_UNRECLAIMABLE)),
 		global_page_state(NR_KERNEL_STACK) * THREAD_SIZE / 1024,
 		K(global_page_state(NR_PAGETABLE)),
+#ifdef CONFIG_UKSM
+        K(global_page_state(NR_UKSM_ZERO_PAGES)),
+#endif
 #ifdef CONFIG_QUICKLIST
 		K(quicklist_total_size()),
 #endif
@@ -150,6 +164,10 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		vmi.largest_chunk >> 10
 #ifdef CONFIG_MEMORY_FAILURE
 		,atomic_long_read(&mce_bad_pages) << (PAGE_SHIFT - 10)
+#endif
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+        ,K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
+                            HPAGE_PMD_NR)
 #endif
 		);
 

@@ -38,6 +38,7 @@ int page_cluster;
 
 static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);
 static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);
+static DEFINE_PER_CPU(struct pagevec, lru_deactivate_pvecs);
 
 /*
  * This path almost never happens for VM activity - pages are normally
@@ -55,7 +56,7 @@ static void __page_cache_release(struct page *page)
 		del_page_from_lru(zone, page);
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 	}
-	free_hot_page(page);
+	free_hot_cold_page(page, 0);
 }
 
 static void put_compound_page(struct page *page)
@@ -265,6 +266,59 @@ void add_page_to_unevictable_list(struct page *page)
 }
 
 /*
+ * If the page can not be invalidated, it is moved to the
+ * inactive list to speed up its reclaim.  It is moved to the
+ * head of the list, rather than the tail, to give the flusher
+ * threads some time to write it out, as this is much more
+ * effective than the single-page writeout from reclaim.
+ */
+static void lru_deactivate(struct page *page, struct zone *zone)
+{
+	int lru, file;
+    
+	if (!PageLRU(page) || !PageActive(page))
+		return;
+    
+	/* Some processes are using the page */
+	if (page_mapped(page))
+		return;
+    
+	file = page_is_file_cache(page);
+	lru = page_lru_base_type(page);
+	del_page_from_lru_list(zone, page, lru + LRU_ACTIVE);
+	ClearPageActive(page);
+	ClearPageReferenced(page);
+	add_page_to_lru_list(zone, page, lru);
+	__count_vm_event(PGDEACTIVATE);
+    
+	update_page_reclaim_stat(zone, page, file, 0);
+}
+
+static void ____pagevec_lru_deactivate(struct pagevec *pvec)
+{
+	int i;
+	struct zone *zone = NULL;
+    
+	for (i = 0; i < pagevec_count(pvec); i++) {
+		struct page *page = pvec->pages[i];
+		struct zone *pagezone = page_zone(page);
+        
+		if (pagezone != zone) {
+			if (zone)
+				spin_unlock_irq(&zone->lru_lock);
+			zone = pagezone;
+			spin_lock_irq(&zone->lru_lock);
+		}
+		lru_deactivate(page, zone);
+	}
+	if (zone)
+		spin_unlock_irq(&zone->lru_lock);
+    
+	release_pages(pvec->pages, pvec->nr, pvec->cold);
+	pagevec_reinit(pvec);
+}
+
+/*
  * Drain pages out of the cpu's pagevecs.
  * Either "cpu" is the current CPU, and preemption has already been
  * disabled; or "cpu" is being hot-unplugged, and is already dead.
@@ -290,6 +344,28 @@ void lru_add_drain_cpu(int cpu)
 		pagevec_move_tail(pvec);
 		local_irq_restore(flags);
 	}
+    pvec = &per_cpu(lru_deactivate_pvecs, cpu);
+    if (pagevec_count(pvec))
+        ____pagevec_lru_deactivate(pvec);
+}
+
+/**
+ * deactivate_page - forcefully deactivate a page
+ * @page: page to deactivate
+ *
+ * This function hints the VM that @page is a good reclaim candidate,
+ * for example if its invalidation fails due to the page being dirty
+ * or under writeback.
+ */
+void deactivate_page(struct page *page)
+{
+    if (likely(get_page_unless_zero(page))) {
+        struct pagevec *pvec = &get_cpu_var(lru_deactivate_pvecs);
+        
+        if (!pagevec_add(pvec, page))
+            ____pagevec_lru_deactivate(pvec);
+        put_cpu_var(lru_deactivate_pvecs);
+    }
 }
 
 void lru_add_drain(void)
@@ -395,6 +471,43 @@ void __pagevec_release(struct pagevec *pvec)
 }
 
 EXPORT_SYMBOL(__pagevec_release);
+
+/* used by __split_huge_page_refcount() */
+void lru_add_page_tail(struct zone* zone,
+                       struct page *page, struct page *page_tail)
+{
+	int active;
+	enum lru_list lru;
+	const int file = 0;
+	struct list_head *head;
+    
+	VM_BUG_ON(!PageHead(page));
+	VM_BUG_ON(PageCompound(page_tail));
+	VM_BUG_ON(PageLRU(page_tail));
+	VM_BUG_ON(!spin_is_locked(&zone->lru_lock));
+    
+	SetPageLRU(page_tail);
+    
+	if (page_evictable(page_tail, NULL)) {
+		if (PageActive(page)) {
+			SetPageActive(page_tail);
+			active = 1;
+			lru = LRU_ACTIVE_ANON;
+		} else {
+			active = 0;
+			lru = LRU_INACTIVE_ANON;
+		}
+		update_page_reclaim_stat(zone, page_tail, file, active);
+		if (likely(PageLRU(page)))
+			head = page->lru.prev;
+		else
+			head = &zone->lru[lru].list;
+		__add_page_to_lru_list(zone, page_tail, lru, head);
+	} else {
+		SetPageUnevictable(page_tail);
+		add_page_to_lru_list(zone, page_tail, LRU_UNEVICTABLE);
+	}
+}
 
 /*
  * Add the passed pages to the LRU, then drop the caller's refcount

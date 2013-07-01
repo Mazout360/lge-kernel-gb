@@ -33,6 +33,8 @@
 #include <linux/bitops.h>
 #include <linux/mutex.h>
 #include <linux/anon_inodes.h>
+#include <linux/freezer.h>
+#include <linux/device.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <asm/io.h>
@@ -197,7 +199,7 @@ struct eventpoll {
 	 * holding ->lock.
 	 */
 	struct epitem *ovflist;
-
+    
 	/* The user that created the eventpoll descriptor */
 	struct user_struct *user;
 
@@ -619,7 +621,7 @@ static int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	if (ep_is_linked(&epi->rdllink))
 		list_del_init(&epi->rdllink);
 	spin_unlock_irqrestore(&ep->lock, flags);
-
+    
 	/* At this point it is safe to free the eventpoll item */
 	kmem_cache_free(epi_cache, epi);
 
@@ -670,7 +672,7 @@ static void ep_free(struct eventpoll *ep)
 	mutex_unlock(&epmutex);
 	mutex_destroy(&ep->mtx);
 	free_uid(ep->user);
-	kfree(ep);
+    kfree(ep);
 }
 
 static int ep_eventpoll_release(struct inode *inode, struct file *file)
@@ -1331,7 +1333,7 @@ retry:
 			}
 
 			spin_unlock_irqrestore(&ep->lock, flags);
-			jtimeout = schedule_timeout(jtimeout);
+			jtimeout = freezable_schedule_timeout(jtimeout);
 			spin_lock_irqsave(&ep->lock, flags);
 		}
 		__remove_wait_queue(&ep->wq, &wait);
@@ -1541,7 +1543,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	error = -EPERM;
 	if (!tfile->f_op || !tfile->f_op->poll)
 		goto error_tgt_fput;
-
+    
 	/*
 	 * We have to check that the file structure underneath the file descriptor
 	 * the user passed to us _is_ an eventpoll file. And also we do not permit

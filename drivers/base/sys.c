@@ -302,7 +302,7 @@ void sysdev_unregister(struct sys_device *sysdev)
 	kobject_put(&sysdev->kobj);
 }
 
-
+#ifndef CONFIG_ARCH_NO_SYSDEV_OPS
 
 /**
  *	sysdev_shutdown - Shut down all system devices.
@@ -504,6 +504,7 @@ int sysdev_resume(void)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sysdev_resume);
+#endif /* CONFIG_ARCH_NO_SYSDEV_OPS */
 
 int __init system_bus_init(void)
 {

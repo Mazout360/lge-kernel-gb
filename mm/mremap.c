@@ -42,13 +42,15 @@ static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 		return NULL;
 
 	pmd = pmd_offset(pud, addr);
+    split_huge_page_pmd(mm, pmd);
 	if (pmd_none_or_clear_bad(pmd))
 		return NULL;
 
 	return pmd;
 }
 
-static pmd_t *alloc_new_pmd(struct mm_struct *mm, unsigned long addr)
+static pmd_t *alloc_new_pmd(struct mm_struct *mm, struct vm_area_struct *vma,
+                            unsigned long addr)
 {
 	pgd_t *pgd;
 	pud_t *pud;
@@ -63,7 +65,8 @@ static pmd_t *alloc_new_pmd(struct mm_struct *mm, unsigned long addr)
 	if (!pmd)
 		return NULL;
 
-	if (!pmd_present(*pmd) && __pte_alloc(mm, pmd, addr))
+	VM_BUG_ON(pmd_trans_huge(*pmd));
+    if (pmd_none(*pmd) && __pte_alloc(mm, vma, pmd, addr))
 		return NULL;
 
 	return pmd;
@@ -75,6 +78,7 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 		unsigned long new_addr)
 {
 	struct address_space *mapping = NULL;
+    struct anon_vma *anon_vma = vma->anon_vma;
 	struct mm_struct *mm = vma->vm_mm;
 	pte_t *old_pte, *new_pte, pte;
 	spinlock_t *old_ptl, *new_ptl;
@@ -94,6 +98,8 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 		spin_lock(&mapping->i_mmap_lock);
 		new_vma->vm_truncate_count = 0;
 	}
+    if (anon_vma)
+        anon_vma_lock(anon_vma);
 
 	/*
 	 * We don't have to worry about the ordering of src and dst
@@ -120,6 +126,8 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 		spin_unlock(new_ptl);
 	pte_unmap_nested(new_pte - 1);
 	pte_unmap_unlock(old_pte - 1, old_ptl);
+    if (anon_vma)
+        anon_vma_unlock(anon_vma);
 	if (mapping)
 		spin_unlock(&mapping->i_mmap_lock);
 	mmu_notifier_invalidate_range_end(vma->vm_mm, old_start, old_end);
@@ -146,7 +154,7 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 		old_pmd = get_old_pmd(vma->vm_mm, old_addr);
 		if (!old_pmd)
 			continue;
-		new_pmd = alloc_new_pmd(vma->vm_mm, new_addr);
+		new_pmd = alloc_new_pmd(vma->vm_mm, vma, new_addr);
 		if (!new_pmd)
 			break;
 		next = (new_addr + PMD_SIZE) & PMD_MASK;
@@ -465,8 +473,11 @@ unsigned long do_mremap(unsigned long addr,
 		if (vma_expandable(vma, new_len - old_len)) {
 			int pages = (new_len - old_len) >> PAGE_SHIFT;
 
-			vma_adjust(vma, vma->vm_start,
-				addr + new_len, vma->vm_pgoff, NULL);
+			if (vma_adjust(vma, vma->vm_start, addr + new_len,
+                        vma->vm_pgoff, NULL)) {
+                ret = -ENOMEM;
+                goto out;
+            }
 
 			mm->total_vm += pages;
 			vm_stat_account(mm, vma->vm_flags, vma->vm_file, pages);

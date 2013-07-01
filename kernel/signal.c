@@ -1784,7 +1784,7 @@ relock:
 	 * Now that we woke up, it's crucial if we're supposed to be
 	 * frozen that we freeze now before running anything substantial.
 	 */
-	try_to_freeze();
+	try_to_freeze_nowarn();
 
 	spin_lock_irq(&sighand->siglock);
 	/*
@@ -2229,7 +2229,7 @@ SYSCALL_DEFINE4(rt_sigtimedwait, const sigset_t __user *, uthese,
 			recalc_sigpending();
 			spin_unlock_irq(&current->sighand->siglock);
 
-			timeout = schedule_timeout_interruptible(timeout);
+			timeout = freezable_schedule_timeout_interruptible(timeout);
 
 			spin_lock_irq(&current->sighand->siglock);
 			sig = dequeue_signal(current, &these, &info);

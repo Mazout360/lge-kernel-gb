@@ -70,13 +70,15 @@
 #else
 # define SLAB_NOTRACK		0x00000000UL
 #endif
+#ifdef CONFIG_FAILSLAB
+# define SLAB_FAILSLAB		0x02000000UL	/* Fault injection mark */
+#else
+# define SLAB_FAILSLAB		0x00000000UL
+#endif
 
 /* The following flags affect the page allocator grouping pages by mobility */
 #define SLAB_RECLAIM_ACCOUNT	0x00020000UL		/* Objects are reclaimable */
 #define SLAB_TEMPORARY		SLAB_RECLAIM_ACCOUNT	/* Objects are short-lived */
-
-/* Following flags should only be used by allocator specific flags */
-#define SLAB_ALLOC_PRIVATE  0x000000ffUL
 /*
  * ZERO_SIZE_PTR will be returned for zero sized kmalloc requests.
  *
@@ -88,7 +90,7 @@
 #define ZERO_SIZE_PTR ((void *)16)
 
 #define ZERO_OR_NULL_PTR(x) ((unsigned long)(x) <= \
-				(unsigned long)ZERO_SIZE_PTR)
+(unsigned long)ZERO_SIZE_PTR)
 
 /*
  * struct kmem_cache related prototypes
@@ -97,14 +99,12 @@ void __init kmem_cache_init(void);
 int slab_is_available(void);
 
 struct kmem_cache *kmem_cache_create(const char *, size_t, size_t,
-			unsigned long,
-			void (*)(void *));
+                                     unsigned long,
+                                     void (*)(void *));
 void kmem_cache_destroy(struct kmem_cache *);
 int kmem_cache_shrink(struct kmem_cache *);
 void kmem_cache_free(struct kmem_cache *, void *);
 unsigned int kmem_cache_size(struct kmem_cache *);
-const char *kmem_cache_name(struct kmem_cache *);
-int kmem_ptr_validate(struct kmem_cache *cachep, const void *ptr);
 
 /*
  * Please use this macro to create slab caches. Simply specify the
@@ -115,8 +115,8 @@ int kmem_ptr_validate(struct kmem_cache *cachep, const void *ptr);
  * then the objects will be properly aligned in SMP configurations.
  */
 #define KMEM_CACHE(__struct, __flags) kmem_cache_create(#__struct,\
-		sizeof(struct __struct), __alignof__(struct __struct),\
-		(__flags), NULL)
+sizeof(struct __struct), __alignof__(struct __struct),\
+(__flags), NULL)
 
 /*
  * The largest kmalloc size supported by the slab allocators is
@@ -128,7 +128,7 @@ int kmem_ptr_validate(struct kmem_cache *cachep, const void *ptr);
  * ensure proper constant folding.
  */
 #define KMALLOC_SHIFT_HIGH	((MAX_ORDER + PAGE_SHIFT - 1) <= 25 ? \
-				(MAX_ORDER + PAGE_SHIFT - 1) : 25)
+(MAX_ORDER + PAGE_SHIFT - 1) : 25)
 
 #define KMALLOC_MAX_SIZE	(1UL << KMALLOC_SHIFT_HIGH)
 #define KMALLOC_MAX_ORDER	(KMALLOC_SHIFT_HIGH - PAGE_SHIFT)
@@ -163,8 +163,6 @@ size_t ksize(const void *);
  */
 #ifdef CONFIG_SLUB
 #include <linux/slub_def.h>
-#elif defined(CONFIG_SLQB)
-#include <linux/slqb_def.h>
 #elif defined(CONFIG_SLOB)
 #include <linux/slob_def.h>
 #else
@@ -253,7 +251,7 @@ static inline void *__kmalloc_node(size_t size, gfp_t flags, int node)
 void *kmem_cache_alloc(struct kmem_cache *, gfp_t);
 
 static inline void *kmem_cache_alloc_node(struct kmem_cache *cachep,
-					gfp_t flags, int node)
+                                          gfp_t flags, int node)
 {
 	return kmem_cache_alloc(cachep, flags);
 }
@@ -267,13 +265,14 @@ static inline void *kmem_cache_alloc_node(struct kmem_cache *cachep,
  * allocator where we care about the real place the memory allocation
  * request comes from.
  */
-#if defined(CONFIG_DEBUG_SLAB) || defined(CONFIG_SLUB) || defined(CONFIG_SLQB_DEBUG)
+#if defined(CONFIG_DEBUG_SLAB) || defined(CONFIG_SLUB) || \
+(defined(CONFIG_SLAB) && defined(CONFIG_TRACING))
 extern void *__kmalloc_track_caller(size_t, gfp_t, unsigned long);
 #define kmalloc_track_caller(size, flags) \
-	__kmalloc_track_caller(size, flags, _RET_IP_)
+__kmalloc_track_caller(size, flags, _RET_IP_)
 #else
 #define kmalloc_track_caller(size, flags) \
-	__kmalloc(size, flags)
+__kmalloc(size, flags)
 #endif /* DEBUG_SLAB */
 
 #ifdef CONFIG_NUMA
@@ -285,20 +284,21 @@ extern void *__kmalloc_track_caller(size_t, gfp_t, unsigned long);
  * standard allocator where we care about the real place the memory
  * allocation request comes from.
  */
-#if defined(CONFIG_DEBUG_SLAB) || defined(CONFIG_SLUB) || defined(CONFIG_SLQB_DEBUG)
+#if defined(CONFIG_DEBUG_SLAB) || defined(CONFIG_SLUB) || \
+(defined(CONFIG_SLAB) && defined(CONFIG_TRACING))
 extern void *__kmalloc_node_track_caller(size_t, gfp_t, int, unsigned long);
 #define kmalloc_node_track_caller(size, flags, node) \
-	__kmalloc_node_track_caller(size, flags, node, \
-			_RET_IP_)
+__kmalloc_node_track_caller(size, flags, node, \
+_RET_IP_)
 #else
 #define kmalloc_node_track_caller(size, flags, node) \
-	__kmalloc_node(size, flags, node)
+__kmalloc_node(size, flags, node)
 #endif
 
 #else /* CONFIG_NUMA */
 
 #define kmalloc_node_track_caller(size, flags, node) \
-	kmalloc_track_caller(size, flags)
+kmalloc_track_caller(size, flags)
 
 #endif /* CONFIG_NUMA */
 

@@ -32,6 +32,7 @@
 #include <linux/transport_class.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/slab.h>
 
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>

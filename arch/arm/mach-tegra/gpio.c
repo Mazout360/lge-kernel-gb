@@ -25,6 +25,7 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 
 #include <mach/iomap.h>
 #include <mach/pinmux.h>

@@ -28,6 +28,7 @@
 #include <linux/workqueue.h>
 #include <linux/irq.h>
 #include <linux/gpio.h>
+#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include "kxtf9.h"
 

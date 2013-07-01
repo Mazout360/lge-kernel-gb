@@ -24,6 +24,7 @@
 #include <linux/ioctl.h>
 #include <linux/miscdevice.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 
 #include <nvodm_gyroscope_accel.h>
 #include "nvodm_gyro_accel_kxtf9.h"

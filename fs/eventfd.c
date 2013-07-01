@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/kref.h>
 #include <linux/eventfd.h>
+#include <linux/slab.h>
 
 struct eventfd_ctx {
 	struct kref kref;

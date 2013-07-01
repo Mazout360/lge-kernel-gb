@@ -23,6 +23,7 @@
 #include <linux/completion.h>
 #include <linux/sched.h>
 #include <linux/cpu.h>
+#include <linux/slab.h>
 
 #include <asm/cacheflush.h>
 #include <mach/hardware.h>

@@ -12,6 +12,7 @@
 #include <linux/linkage.h>
 #include <linux/pagemap.h>
 #include <linux/quotaops.h>
+#include <linux/slab.h>
 #include <linux/buffer_head.h>
 #include "internal.h"
 

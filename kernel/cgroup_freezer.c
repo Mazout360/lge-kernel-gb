@@ -20,6 +20,7 @@
 #include <linux/uaccess.h>
 #include <linux/freezer.h>
 #include <linux/seq_file.h>
+#include <linux/slab.h>
 
 enum freezer_state {
 	CGROUP_THAWED = 0,
@@ -228,7 +229,7 @@ static void freezer_fork(struct cgroup_subsys *ss, struct task_struct *task)
 
 	/* Locking avoids race with FREEZING -> THAWED transitions. */
 	if (freezer->state == CGROUP_FREEZING)
-		freeze_task(task, true);
+		freeze_task(task);
 	spin_unlock_irq(&freezer->lock);
 }
 
@@ -298,7 +299,7 @@ static int try_to_freeze_cgroup(struct cgroup *cgroup, struct freezer *freezer)
 	freezer->state = CGROUP_FREEZING;
 	cgroup_iter_start(cgroup, &it);
 	while ((task = cgroup_iter_next(cgroup, &it))) {
-		if (!freeze_task(task, true))
+		if (!freeze_task(task))
 			continue;
 		if (is_task_frozen_enough(task))
 			continue;

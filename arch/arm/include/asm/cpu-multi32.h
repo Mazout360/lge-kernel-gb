@@ -48,7 +48,7 @@ extern struct processor {
 	 * D-cache without flushing the cache.
 	 */
 	void (*dcache_clean_area)(void *addr, int size);
-
+    
 	/*
 	 * Set the page table
 	 */

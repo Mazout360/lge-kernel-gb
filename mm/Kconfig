@@ -167,6 +167,15 @@ config SPLIT_PTLOCK_CPUS
 	default "4"
 
 #
+# support for memory compaction
+config COMPACTION
+	bool "Allow for memory compaction"
+	select MIGRATION
+	depends on MMU
+	help
+	  Allows the compaction of memory for the allocation of huge pages.
+
+#
 # support for page migration
 #
 config MIGRATION
@@ -217,6 +226,32 @@ config KSM
 	  See Documentation/vm/ksm.txt for more information: KSM is inactive
 	  until a program has madvised that an area is MADV_MERGEABLE, and
 	  root has set /sys/kernel/mm/ksm/run to 1 (if CONFIG_SYSFS is set).
+choice
+	prompt "Choose UKSM/KSM strategy"
+	default UKSM
+	depends on KSM
+	help
+	  This option allows to select a UKSM/KSM stragety.
+
+config UKSM
+	bool "Ultra-KSM for page merging"
+	depends on KSM
+	help
+	  UKSM is inspired by the Linux kernel project \u2014 KSM(Kernel Same
+	  page Merging), but with a fundamentally rewritten core algorithm. With
+	  an advanced algorithm, UKSM now can transparently scans all anonymously
+	  mapped user space applications with an significantly improved scan speed
+	  and CPU efficiency. Since KVM is friendly to KSM, KVM can also benefit from
+	  UKSM. Now UKSM has its first stable release and first real world enterprise user.
+	  For more information, please goto its project page.
+	  (www.kerneldedup.org)
+
+config KSM_LEGACY
+	bool "Legacy KSM implementation"
+	depends on KSM
+	help
+	  The legacy KSM implementation from Redhat.
+endchoice
 
 config DEFAULT_MMAP_MIN_ADDR
         int "Low address space to protect from user allocation"
@@ -283,6 +318,14 @@ config NOMMU_INITIAL_TRIM_EXCESS
 
 	  See Documentation/nommu-mmap.txt for more information.
 
+#
+# UP and nommu archs use km based percpu allocator
+#
+config NEED_PER_CPU_KM
+  depends on !SMP
+  bool
+  default y
+
 config CLEANCACHE
 	bool "Enable cleancache driver to cache clean pages if tmem is present"
 	default n
@@ -321,3 +364,40 @@ config FRONTSWAP
 	  compare-against-NULL resulting in a negligible performance hit.
 
 	  If unsure, say Y to enable frontswap.
+
+config TRANSPARENT_HUGEPAGE
+	bool "Transparent Hugepage Support"
+	depends on X86 && MMU
+	help
+	  Transparent Hugepages allows the kernel to use huge pages and
+	  huge tlb transparently to the applications whenever possible.
+	  This feature can improve computing performance to certain
+	  applications by speeding up page faults during memory
+	  allocation, by reducing the number of tlb misses and by speeding
+	  up the pagetable walking.
+
+	  If memory constrained on embedded, you may want to say N.
+
+choice
+	prompt "Transparent Hugepage Support sysfs defaults"
+	depends on TRANSPARENT_HUGEPAGE
+	default TRANSPARENT_HUGEPAGE_ALWAYS
+	help
+	  Selects the sysfs defaults for Transparent Hugepage Support.
+
+	config TRANSPARENT_HUGEPAGE_ALWAYS
+		bool "always"
+	help
+	  Enabling Transparent Hugepage always, can increase the
+	  memory footprint of applications without a guaranteed
+	  benefit but it will work automatically for all applications.
+
+	config TRANSPARENT_HUGEPAGE_MADVISE
+		bool "madvise"
+	help
+	  Enabling Transparent Hugepage madvise, will only provide a
+	  performance improvement benefit to the applications using
+	  madvise(MADV_HUGEPAGE) but it won't risk to increase the
+	  memory footprint of applications without a guaranteed
+	  benefit.
+endchoice

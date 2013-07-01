@@ -30,6 +30,7 @@
 #include <linux/mutex.h>
 #include <linux/scatterlist.h>
 #include <linux/string_helpers.h>
+#include <linux/slab.h>
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>

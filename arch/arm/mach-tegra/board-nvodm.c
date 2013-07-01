@@ -33,6 +33,7 @@
 #include <linux/reboot.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
+#include <linux/slab.h>
 
 #ifdef CONFIG_TOUCHSCREEN_PANJIT_I2C
 #include <linux/i2c/panjit_ts.h>

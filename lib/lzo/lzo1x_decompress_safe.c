@@ -26,7 +26,7 @@
 #define TEST_LB(m_pos)  if ((m_pos) < out) goto lookbehind_overrun
 
 int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
-			  unsigned char *out, size_t *out_len)
+                          unsigned char *out, size_t *out_len)
 {
 	unsigned char *op;
 	const unsigned char *ip;
@@ -35,10 +35,10 @@ int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 	const unsigned char *m_pos;
 	const unsigned char * const ip_end = in + in_len;
 	unsigned char * const op_end = out + *out_len;
-
+    
 	op = out;
 	ip = in;
-
+    
 	if (unlikely(in_len < 3))
 		goto input_overrun;
 	if (*ip > 17) {
@@ -49,7 +49,7 @@ int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 		}
 		goto copy_literal_run;
 	}
-
+    
 	for (;;) {
 		t = *ip++;
 		if (t < 16) {
@@ -63,7 +63,8 @@ int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 					t += 15 + *ip++;
 				}
 				t += 3;
-copy_literal_run:
+            copy_literal_run:
+#if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
 				if (likely(HAVE_IP(t + 15) && HAVE_OP(t + 15))) {
 					const unsigned char *ie = ip + t;
 					unsigned char *oe = op + t;
@@ -77,7 +78,9 @@ copy_literal_run:
 					} while (ip < ie);
 					ip = ie;
 					op = oe;
-				} else {
+				} else
+#endif
+				{
 					NEED_OP(t);
 					NEED_IP(t + 3);
 					do {
@@ -148,6 +151,7 @@ copy_literal_run:
 			m_pos -= 0x4000;
 		}
 		TEST_LB(m_pos);
+#if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
 		if (op - m_pos >= 8) {
 			unsigned char *oe = op + t;
 			if (likely(HAVE_OP(t + 15))) {
@@ -173,7 +177,9 @@ copy_literal_run:
 					*op++ = *m_pos++;
 				} while (op < oe);
 			}
-		} else {
+		} else
+#endif
+		{
 			unsigned char *oe = op + t;
 			NEED_OP(t);
 			op[0] = m_pos[0];
@@ -184,14 +190,17 @@ copy_literal_run:
 				*op++ = *m_pos++;
 			} while (op < oe);
 		}
-match_next:
+    match_next:
 		state = next;
 		t = next;
+#if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
 		if (likely(HAVE_IP(6) && HAVE_OP(4))) {
 			COPY4(op, ip);
 			op += t;
 			ip += t;
-		} else {
+		} else
+#endif
+		{
 			NEED_IP(t + 3);
 			NEED_OP(t);
 			while (t > 0) {
@@ -200,21 +209,21 @@ match_next:
 			}
 		}
 	}
-
+    
 eof_found:
 	*out_len = op - out;
 	return (t != 3       ? LZO_E_ERROR :
-		ip == ip_end ? LZO_E_OK :
-		ip <  ip_end ? LZO_E_INPUT_NOT_CONSUMED : LZO_E_INPUT_OVERRUN);
-
+            ip == ip_end ? LZO_E_OK :
+            ip <  ip_end ? LZO_E_INPUT_NOT_CONSUMED : LZO_E_INPUT_OVERRUN);
+    
 input_overrun:
 	*out_len = op - out;
 	return LZO_E_INPUT_OVERRUN;
-
+    
 output_overrun:
 	*out_len = op - out;
 	return LZO_E_OUTPUT_OVERRUN;
-
+    
 lookbehind_overrun:
 	*out_len = op - out;
 	return LZO_E_LOOKBEHIND_OVERRUN;

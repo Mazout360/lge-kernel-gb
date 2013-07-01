@@ -12,6 +12,7 @@
 #include <linux/seq_file.h>
 #include <linux/rcupdate.h>
 #include <linux/mutex.h>
+#include <linux/slab.h>
 
 #define ACC_MKNOD 1
 #define ACC_READ  2

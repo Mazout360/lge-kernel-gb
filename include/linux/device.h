@@ -414,6 +414,7 @@ struct device {
 	void		*platform_data;	/* Platform specific data, device
 					   core doesn't touch it */
 	struct dev_pm_info	power;
+    struct dev_power_domain  *pwr_domain;
 
 #ifdef CONFIG_NUMA
 	int		numa_node;	/* NUMA node this device is close to */
@@ -493,19 +494,34 @@ static inline int device_is_registered(struct device *dev)
 
 static inline void device_enable_async_suspend(struct device *dev)
 {
-    if (dev->power.status == DPM_ON)
+    if (!dev->power.in_suspend)
         dev->power.async_suspend = true;
 }
 
 static inline void device_disable_async_suspend(struct device *dev)
 {
-    if (dev->power.status == DPM_ON)
+    if (!dev->power.in_suspend)
         dev->power.async_suspend = false;
 }
 
 static inline bool device_async_suspend_enabled(struct device *dev)
 {
     return !!dev->power.async_suspend;
+}
+
+static inline void device_lock(struct device *dev)
+{
+    down(&dev->sem);
+}
+
+static inline int device_trylock(struct device *dev)
+{
+    return down_trylock(&dev->sem);
+}
+
+static inline void device_unlock(struct device *dev)
+{
+    up(&dev->sem);
 }
 
 void driver_init(void);

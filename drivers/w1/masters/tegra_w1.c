@@ -28,6 +28,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 
 #include "../w1.h"

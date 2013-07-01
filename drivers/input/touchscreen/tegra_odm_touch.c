@@ -27,6 +27,7 @@
 #include <linux/delay.h>
 #include <linux/earlysuspend.h>
 #include <linux/freezer.h>
+#include <linux/slab.h>
 //#include <linux/tegra_devices.h>
 #include <nvodm_services.h>
 #include <nvodm_touch.h>

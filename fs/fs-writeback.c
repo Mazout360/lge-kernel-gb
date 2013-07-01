@@ -25,6 +25,7 @@
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 #include <linux/buffer_head.h>
+#include <linux/slab.h>
 #include "internal.h"
 
 #define inode_to_bdi(inode)	((inode)->i_mapping->backing_dev_info)
@@ -726,7 +727,7 @@ static inline bool over_bground_thresh(void)
 {
 	unsigned long background_thresh, dirty_thresh;
 
-	get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);
+	global_dirty_limits(&background_thresh, &dirty_thresh);
 
 	return (global_page_state(NR_FILE_DIRTY) +
 		global_page_state(NR_UNSTABLE_NFS) >= background_thresh);
@@ -942,7 +943,7 @@ int bdi_writeback_task(struct bdi_writeback *wb)
 	unsigned long wait_jiffies = -1UL;
 	long pages_written;
 
-	while (!kthread_should_stop()) {
+	while (!kthread_freezable_should_stop(NULL)) {
 		pages_written = wb_do_writeback(wb, 0);
 
 		if (pages_written)
@@ -965,8 +966,6 @@ int bdi_writeback_task(struct bdi_writeback *wb)
 			schedule_timeout_interruptible(wait_jiffies);
 		} else
 			schedule();
-
-		try_to_freeze();
 	}
 
 	return 0;

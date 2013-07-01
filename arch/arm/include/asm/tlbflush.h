@@ -564,7 +564,15 @@ extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
  * cache entries for the kernels virtual memory range are written
  * back to the page.
  */
-extern void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr, pte_t pte);
+#if __LINUX_ARM_ARCH__ < 6
+extern void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr,
+                            pte_t *ptep);
+#else
+static inline void update_mmu_cache(struct vm_area_struct *vma,
+                                    unsigned long addr, pte_t *ptep)
+{
+}
+#endif
 
 #endif
 

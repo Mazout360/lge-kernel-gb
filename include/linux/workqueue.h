@@ -22,11 +22,47 @@ typedef void (*work_func_t)(struct work_struct *work);
  */
 #define work_data_bits(work) ((unsigned long *)(&(work)->data))
 
+enum {
+    WORK_STRUCT_PENDING_BIT  = 0,  /* work item is pending execution */
+    WORK_STRUCT_LINKED_BIT  = 1,  /* next work is linked to this one */
+#ifdef CONFIG_DEBUG_OBJECTS_WORK
+    WORK_STRUCT_STATIC_BIT  = 2,  /* static initializer (debugobjects) */
+    WORK_STRUCT_COLOR_SHIFT  = 3,  /* color for workqueue flushing */
+#else
+    WORK_STRUCT_COLOR_SHIFT  = 2,  /* color for workqueue flushing */
+#endif
+
+    WORK_STRUCT_COLOR_BITS  = 4,
+    
+    WORK_STRUCT_PENDING  = 1 << WORK_STRUCT_PENDING_BIT,
+    WORK_STRUCT_LINKED  = 1 << WORK_STRUCT_LINKED_BIT,
+#ifdef CONFIG_DEBUG_OBJECTS_WORK
+    WORK_STRUCT_STATIC  = 1 << WORK_STRUCT_STATIC_BIT,
+#else
+    WORK_STRUCT_STATIC  = 0,
+#endif
+    
+    /*
+     * The last color is no color used for works which don't
+     * participate in workqueue flushing.
+     */
+    WORK_NR_COLORS    = (1 << WORK_STRUCT_COLOR_BITS) - 1,
+    WORK_NO_COLOR    = WORK_NR_COLORS,
+    
+      /*
+       * Reserve 6 bits off of cwq pointer w/ debugobjects turned
+       * off.  This makes cwqs aligned to 64 bytes which isn't too
+       * excessive while allowing 15 workqueue flush colors.
+       */
+    WORK_STRUCT_FLAG_BITS  = WORK_STRUCT_COLOR_SHIFT +
+              WORK_STRUCT_COLOR_BITS,
+    
+    WORK_STRUCT_FLAG_MASK  = (1UL << WORK_STRUCT_FLAG_BITS) - 1,
+    WORK_STRUCT_WQ_DATA_MASK = ~WORK_STRUCT_FLAG_MASK,
+};
+
 struct work_struct {
 	atomic_long_t data;
-#define WORK_STRUCT_PENDING 0		/* T if work item pending execution */
-#define WORK_STRUCT_FLAG_MASK (3UL)
-#define WORK_STRUCT_WQ_DATA_MASK (~WORK_STRUCT_FLAG_MASK)
 	struct list_head entry;
 	work_func_t func;
 #ifdef CONFIG_LOCKDEP
@@ -35,6 +71,7 @@ struct work_struct {
 };
 
 #define WORK_DATA_INIT()	ATOMIC_LONG_INIT(0)
+#define WORK_DATA_STATIC_INIT()  ATOMIC_LONG_INIT(WORK_STRUCT_STATIC)
 
 struct delayed_work {
 	struct work_struct work;
@@ -63,7 +100,7 @@ struct execute_work {
 #endif
 
 #define __WORK_INITIALIZER(n, f) {				\
-	.data = WORK_DATA_INIT(),				\
+	.data = WORK_DATA_STATIC_INIT(),      \
 	.entry	= { &(n).entry, &(n).entry },			\
 	.func = (f),						\
 	__WORK_INIT_LOCKDEP_MAP(#n, &(n))			\
@@ -91,6 +128,19 @@ struct execute_work {
 #define PREPARE_DELAYED_WORK(_work, _func)			\
 	PREPARE_WORK(&(_work)->work, (_func))
 
+#ifdef CONFIG_DEBUG_OBJECTS_WORK
+extern void __init_work(struct work_struct *work, int onstack);
+extern void destroy_work_on_stack(struct work_struct *work);
+static inline unsigned int work_static(struct work_struct *work)
+{
+    return *work_data_bits(work) & WORK_STRUCT_STATIC;
+}
+#else
+static inline void __init_work(struct work_struct *work, int onstack) { }
+static inline void destroy_work_on_stack(struct work_struct *work) { }
+static inline unsigned int work_static(struct work_struct *work) { return 0; }
+#endif
+
 /*
  * initialize all of a work item in one go
  *
@@ -99,23 +149,35 @@ struct execute_work {
  * to generate better code.
  */
 #ifdef CONFIG_LOCKDEP
-#define INIT_WORK(_work, _func)						\
-	do {								\
+#define __INIT_WORK(_work, _func, _onstack)        \
+do {								\
 		static struct lock_class_key __key;			\
 									\
+        __init_work((_work), _onstack);        \
 		(_work)->data = (atomic_long_t) WORK_DATA_INIT();	\
 		lockdep_init_map(&(_work)->lockdep_map, #_work, &__key, 0);\
 		INIT_LIST_HEAD(&(_work)->entry);			\
 		PREPARE_WORK((_work), (_func));				\
 	} while (0)
 #else
-#define INIT_WORK(_work, _func)						\
+#define __INIT_WORK(_work, _func, _onstack)        \
 	do {								\
+        __init_work((_work), _onstack);        \
 		(_work)->data = (atomic_long_t) WORK_DATA_INIT();	\
 		INIT_LIST_HEAD(&(_work)->entry);			\
 		PREPARE_WORK((_work), (_func));				\
 	} while (0)
 #endif
+
+#define INIT_WORK(_work, _func)          \
+do {              \
+    __INIT_WORK((_work), (_func), 0);    \
+} while (0)
+
+#define INIT_WORK_ON_STACK(_work, _func)      \
+do {              \
+    __INIT_WORK((_work), (_func), 1);    \
+} while (0)
 
 #define INIT_DELAYED_WORK(_work, _func)				\
 	do {							\
@@ -125,7 +187,7 @@ struct execute_work {
 
 #define INIT_DELAYED_WORK_ON_STACK(_work, _func)		\
 	do {							\
-		INIT_WORK(&(_work)->work, (_func));		\
+		INIT_WORK_ON_STACK(&(_work)->work, (_func));  \
 		init_timer_on_stack(&(_work)->timer);		\
 	} while (0)
 
@@ -135,18 +197,12 @@ struct execute_work {
 		init_timer_deferrable(&(_work)->timer);		\
 	} while (0)
 
-#define INIT_DELAYED_WORK_ON_STACK(_work, _func)		\
-	do {							\
-		INIT_WORK(&(_work)->work, (_func));		\
-		init_timer_on_stack(&(_work)->timer);		\
-	} while (0)
-
 /**
  * work_pending - Find out whether a work item is currently pending
  * @work: The work item in question
  */
 #define work_pending(work) \
-	test_bit(WORK_STRUCT_PENDING, work_data_bits(work))
+	test_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))
 
 /**
  * delayed_work_pending - Find out whether a delayable work item is currently
@@ -161,16 +217,19 @@ struct execute_work {
  * @work: The work item in question
  */
 #define work_clear_pending(work) \
-	clear_bit(WORK_STRUCT_PENDING, work_data_bits(work))
+	clear_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))
 
+enum {
+    WQ_FREEZEABLE    = 1 << 0, /* freeze during suspend */
+    WQ_SINGLE_THREAD  = 1 << 1, /* no per-cpu worker */
+};
 
 extern struct workqueue_struct *
-__create_workqueue_key(const char *name, int singlethread,
-		       int freezeable, int rt, struct lock_class_key *key,
-		       const char *lock_name);
+__create_workqueue_key(const char *name, unsigned int flags, int max_active,
+                        struct lock_class_key *key, const char *lock_name);
 
 #ifdef CONFIG_LOCKDEP
-#define __create_workqueue(name, singlethread, freezeable, rt)	\
+#define __create_workqueue(name, flags, max_active)    \
 ({								\
 	static struct lock_class_key __key;			\
 	const char *__lock_name;				\
@@ -180,20 +239,20 @@ __create_workqueue_key(const char *name, int singlethread,
 	else							\
 		__lock_name = #name;				\
 								\
-	__create_workqueue_key((name), (singlethread),		\
-			       (freezeable), (rt), &__key,	\
-			       __lock_name);			\
+    __create_workqueue_key((name), (flags), (max_active),  \
+            &__key, __lock_name);    \
 })
 #else
-#define __create_workqueue(name, singlethread, freezeable, rt)	\
-	__create_workqueue_key((name), (singlethread), (freezeable), (rt), \
-			       NULL, NULL)
+#define __create_workqueue(name, flags, max_active)    \
+  __create_workqueue_key((name), (flags), (max_active), NULL, NULL)
 #endif
 
-#define create_workqueue(name) __create_workqueue((name), 0, 0, 0)
-#define create_rt_workqueue(name) __create_workqueue((name), 0, 0, 1)
-#define create_freezeable_workqueue(name) __create_workqueue((name), 1, 1, 0)
-#define create_singlethread_workqueue(name) __create_workqueue((name), 1, 0, 0)
+#define create_workqueue(name)          \
+   __create_workqueue((name), 0, 1)
+#define create_freezeable_workqueue(name)      \
+    __create_workqueue((name), WQ_FREEZEABLE | WQ_SINGLE_THREAD, 1)
+#define create_singlethread_workqueue(name)      \
+    __create_workqueue((name), WQ_SINGLE_THREAD, 1)
 
 extern void destroy_workqueue(struct workqueue_struct *wq);
 
@@ -281,4 +340,15 @@ static inline long work_on_cpu(unsigned int cpu, long (*fn)(void *), void *arg)
 #else
 long work_on_cpu(unsigned int cpu, long (*fn)(void *), void *arg);
 #endif /* CONFIG_SMP */
+
+#ifdef CONFIG_LOCKDEP
+int in_workqueue_context(struct workqueue_struct *wq);
+#endif
+
+#ifdef CONFIG_FREEZER
+extern void freeze_workqueues_begin(void);
+extern bool freeze_workqueues_busy(void);
+extern void thaw_workqueues(void);
+#endif /* CONFIG_FREEZER */
+
 #endif

@@ -69,7 +69,7 @@ static int h4_open(struct hci_uart *hu)
 
 	BT_DBG("hu %p", hu);
 
-	h4 = kzalloc(sizeof(*h4), GFP_ATOMIC);
+	h4 = kzalloc(sizeof(*h4), GFP_KERNEL);
 	if (!h4)
 		return -ENOMEM;
 
@@ -246,7 +246,7 @@ static int h4_recv(struct hci_uart *hu, void *data, int count)
 			BT_ERR("Can't allocate mem for new packet");
 			h4->rx_state = H4_W4_PACKET_TYPE;
 			h4->rx_count = 0;
-			return 0;
+			return -ENOMEM;
 		}
         
 		h4->rx_skb->dev = (void *) hu->hdev;

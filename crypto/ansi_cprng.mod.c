@@ -17,23 +17,22 @@ __attribute__((section(".gnu.linkonce.this_module"))) = {
 static const struct modversion_info ____versions[]
 __used
 __attribute__((section("__versions"))) = {
-	{ 0xa1f43910, "module_layout" },
-	{ 0x88ff432f, "crypto_rng_type" },
-	{ 0x6980fe91, "param_get_int" },
-	{ 0xff964b25, "param_set_int" },
+	{ 0x9618593f, "module_layout" },
+	{ 0x9c836dcc, "crypto_rng_type" },
+	{ 0xa90c928a, "param_ops_int" },
 	{ 0xe52592a, "panic" },
 	{ 0x71c90087, "memcmp" },
 	{ 0x4059792f, "print_hex_dump" },
-	{ 0x773a56a8, "crypto_alloc_base" },
+	{ 0x2f63c33d, "crypto_alloc_base" },
 	{ 0x4fd6fa59, "_spin_unlock_bh" },
 	{ 0xea147363, "printk" },
 	{ 0xfa2a45e, "__memzero" },
 	{ 0x9d669763, "memcpy" },
 	{ 0xe9a23a48, "_spin_lock_bh" },
 	{ 0xb0aa812e, "fips_enabled" },
-	{ 0x9c06e667, "crypto_register_alg" },
-	{ 0xa94f5be8, "crypto_destroy_tfm" },
-	{ 0xe3dfaffa, "crypto_unregister_alg" },
+	{ 0xfed82c33, "crypto_register_alg" },
+	{ 0xdeb40c3f, "crypto_destroy_tfm" },
+	{ 0xfc79d3ae, "crypto_unregister_alg" },
 };
 
 static const char __module_depends[]

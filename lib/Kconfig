@@ -147,10 +147,6 @@ config DECOMPRESS_LZO
 	select LZO_DECOMPRESS
 	tristate
 
-config DECOMPRESS_LZ4 
-	select LZ4_DECOMPRESS 
-	tristate
-
 #
 # compression support is select'ed if needed
 #
@@ -183,6 +179,10 @@ config DECOMPRESS_BZIP2
 	tristate
 
 config DECOMPRESS_LZMA
+	tristate
+
+config DECOMPRESS_LZ4 
+	select LZ4_DECOMPRESS 
 	tristate
 
 #

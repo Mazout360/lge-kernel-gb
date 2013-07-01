@@ -6,6 +6,7 @@
 #include <linux/bio.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/slab.h>
 
 struct noop_data {
 	struct list_head queue;

@@ -55,6 +55,7 @@ asynchronous and synchronous parts of the kernel.
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/kthread.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <asm/atomic.h>
 

@@ -252,32 +252,6 @@ static void bdi_writeout_fraction(struct backing_dev_info *bdi,
 	}
 }
 
-/*
- * Clip the earned share of dirty pages to that which is actually available.
- * This avoids exceeding the total dirty_limit when the floating averages
- * fluctuate too quickly.
- */
-static void clip_bdi_dirty_limit(struct backing_dev_info *bdi,
-		unsigned long dirty, unsigned long *pbdi_dirty)
-{
-	unsigned long avail_dirty;
-
-	avail_dirty = global_page_state(NR_FILE_DIRTY) +
-		 global_page_state(NR_WRITEBACK) +
-		 global_page_state(NR_UNSTABLE_NFS) +
-		 global_page_state(NR_WRITEBACK_TEMP);
-
-	if (avail_dirty < dirty)
-		avail_dirty = dirty - avail_dirty;
-	else
-		avail_dirty = 0;
-
-	avail_dirty += bdi_stat(bdi, BDI_RECLAIMABLE) +
-		bdi_stat(bdi, BDI_WRITEBACK);
-
-	*pbdi_dirty = min(*pbdi_dirty, avail_dirty);
-}
-
 static inline void task_dirties_fraction(struct task_struct *tsk,
 		long *numerator, long *denominator)
 {
@@ -292,10 +266,11 @@ static inline void task_dirties_fraction(struct task_struct *tsk,
  *
  *   dirty -= (dirty/8) * p_{t}
  */
-static void task_dirty_limit(struct task_struct *tsk, unsigned long *pdirty)
+static unsigned long task_dirty_limit(struct task_struct *tsk,
+                                    unsigned long bdi_dirty)
 {
 	long numerator, denominator;
-	unsigned long dirty = *pdirty;
+	unsigned long dirty = bdi_dirty;
 	u64 inv = dirty >> 3;
 
 	task_dirties_fraction(tsk, &numerator, &denominator);
@@ -303,10 +278,8 @@ static void task_dirty_limit(struct task_struct *tsk, unsigned long *pdirty)
 	do_div(inv, denominator);
 
 	dirty -= inv;
-	if (dirty < *pdirty/2)
-		dirty = *pdirty/2;
-
-	*pdirty = dirty;
+    
+	return max(dirty, bdi_dirty/2);
 }
 
 /*
@@ -416,9 +389,7 @@ unsigned long determine_dirtyable_memory(void)
 	return x + 1;	/* Ensure that we never return 0 */
 }
 
-void
-get_dirty_limits(unsigned long *pbackground, unsigned long *pdirty,
-		 unsigned long *pbdi_dirty, struct backing_dev_info *bdi)
+void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty)
 {
 	unsigned long background;
 	unsigned long dirty;
@@ -450,27 +421,28 @@ get_dirty_limits(unsigned long *pbackground, unsigned long *pdirty,
 	}
 	*pbackground = background;
 	*pdirty = dirty;
+}
 
-	if (bdi) {
-		u64 bdi_dirty;
-		long numerator, denominator;
+unsigned long bdi_dirty_limit(struct backing_dev_info *bdi,
+                              unsigned long dirty)
+{
+    u64 bdi_dirty;
+    long numerator, denominator;
 
 		/*
 		 * Calculate this BDI's share of the dirty ratio.
 		 */
-		bdi_writeout_fraction(bdi, &numerator, &denominator);
+    bdi_writeout_fraction(bdi, &numerator, &denominator);
 
-		bdi_dirty = (dirty * (100 - bdi_min_ratio)) / 100;
-		bdi_dirty *= numerator;
-		do_div(bdi_dirty, denominator);
-		bdi_dirty += (dirty * bdi->min_ratio) / 100;
-		if (bdi_dirty > (dirty * bdi->max_ratio) / 100)
-			bdi_dirty = dirty * bdi->max_ratio / 100;
+	bdi_dirty = (dirty * (100 - bdi_min_ratio)) / 100;
+    bdi_dirty *= numerator;
+    do_div(bdi_dirty, denominator);
 
-		*pbdi_dirty = bdi_dirty;
-		clip_bdi_dirty_limit(bdi, dirty, pbdi_dirty);
-		task_dirty_limit(current, pbdi_dirty);
-	}
+	bdi_dirty += (dirty * bdi->min_ratio) / 100;
+    if (bdi_dirty > (dirty * bdi->max_ratio) / 100)
+        bdi_dirty = dirty * bdi->max_ratio / 100;
+    
+    return bdi_dirty;
 }
 
 /*
@@ -501,14 +473,16 @@ static void balance_dirty_pages(struct address_space *mapping,
 			.nr_to_write	= write_chunk,
 			.range_cyclic	= 1,
 		};
-
-		get_dirty_limits(&background_thresh, &dirty_thresh,
-				&bdi_thresh, bdi);
-
+        
 		nr_reclaimable = global_page_state(NR_FILE_DIRTY) +
 					global_page_state(NR_UNSTABLE_NFS);
 		nr_writeback = global_page_state(NR_WRITEBACK);
 
+        global_dirty_limits(&background_thresh, &dirty_thresh);
+        
+        bdi_thresh = bdi_dirty_limit(bdi, dirty_thresh);
+        bdi_thresh = task_dirty_limit(current, bdi_thresh);
+        
 		bdi_nr_reclaimable = bdi_stat(bdi, BDI_RECLAIMABLE);
 		bdi_nr_writeback = bdi_stat(bdi, BDI_WRITEBACK);
 
@@ -539,8 +513,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 		if (bdi_nr_reclaimable > bdi_thresh) {
 			writeback_inodes_wbc(&wbc);
 			pages_written += write_chunk - wbc.nr_to_write;
-			get_dirty_limits(&background_thresh, &dirty_thresh,
-				       &bdi_thresh, bdi);
+			global_dirty_limits(&background_thresh, &dirty_thresh);
 		}
 
 		/*
@@ -660,7 +633,7 @@ void throttle_vm_writeout(gfp_t gfp_mask)
 	unsigned long dirty_thresh;
 
         for ( ; ; ) {
-		get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);
+		global_dirty_limits(&background_thresh, &dirty_thresh);
 
                 /*
                  * Boost the allowable dirty threshold a bit for page

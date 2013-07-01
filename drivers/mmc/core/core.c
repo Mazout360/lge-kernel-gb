@@ -1314,6 +1314,7 @@ int mmc_suspend_host(struct mmc_host *host, pm_message_t state)
 	if (host->bus_ops && !host->bus_dead) {
 		if (host->bus_ops->suspend)
 			err = host->bus_ops->suspend(host);
+        //flush_delayed_work(&host->disable);
 	}
 	mmc_bus_put(host);
 	mmc_flush_scheduled_work();
