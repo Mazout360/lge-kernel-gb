@@ -81,6 +81,8 @@ deps_config := \
 	fs/Kconfig \
 	drivers/platform/x86/Kconfig \
 	drivers/platform/Kconfig \
+	drivers/staging/zcache/Kconfig \
+	drivers/staging/snappy/Kconfig \
 	drivers/staging/zram/Kconfig \
 	drivers/staging/ramzswap/Kconfig \
 	drivers/staging/iio/trigger/Kconfig \
@@ -100,7 +102,6 @@ deps_config := \
 	drivers/staging/quatech_usb2/Kconfig \
 	drivers/staging/serqt_usb2/Kconfig \
 	drivers/staging/octeon/Kconfig \
-	drivers/gpu/drm/radeon/Kconfig \
 	drivers/staging/line6/Kconfig \
 	drivers/staging/p9auth/Kconfig \
 	drivers/staging/phison/Kconfig \
@@ -223,8 +224,13 @@ deps_config := \
 	drivers/video/display/Kconfig \
 	drivers/video/backlight/Kconfig \
 	drivers/video/tegra/Kconfig \
+	drivers/video/omap2/displays/Kconfig \
+	drivers/video/omap2/omapfb/Kconfig \
+	drivers/video/omap2/dss/Kconfig \
+	drivers/video/omap2/Kconfig \
 	drivers/video/omap/Kconfig \
 	drivers/video/geode/Kconfig \
+	drivers/gpu/stub/Kconfig \
 	drivers/gpu/drm/Kconfig \
 	drivers/gpu/vga/Kconfig \
 	drivers/char/agp/Kconfig \
@@ -557,7 +563,7 @@ deps_config := \
 include/config/auto.conf: \
 	$(deps_config)
 
-ifneq "$(KERNELVERSION)" "2.6.32.60"
+ifneq "$(KERNELVERSION)" "2.6.32.61"
 include/config/auto.conf: FORCE
 endif
 ifneq "$(ARCH)" "arm"

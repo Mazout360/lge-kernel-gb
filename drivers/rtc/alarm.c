@@ -67,6 +67,12 @@ static struct wake_lock alarm_rtc_wake_lock;
 static struct platform_device *alarm_platform_dev;
 struct alarm_queue alarms[ANDROID_ALARM_TYPE_COUNT];
 static bool suspended;
+static long power_on_alarm;
+
+void set_power_on_alarm(long secs)
+{
+    power_on_alarm = secs;
+}
 
 static void update_timer_locked(struct alarm_queue *base, bool head_removed)
 {
@@ -109,12 +115,15 @@ static void alarm_enqueue_locked(struct alarm *alarm)
 	struct rb_node *parent = NULL;
 	struct alarm *entry;
 	int leftmost = 1;
+    bool was_first = false;
 
 	pr_alarm(FLOW, "added alarm, type %d, func %pF at %lld\n",
 		alarm->type, alarm->function, ktime_to_ns(alarm->expires));
 
-	if (base->first == &alarm->node)
+	if (base->first == &alarm->node) {
 		base->first = rb_next(&alarm->node);
+        was_first = true;
+    }
 	if (!RB_EMPTY_NODE(&alarm->node)) {
 		rb_erase(&alarm->node, &base->alarms);
 		RB_CLEAR_NODE(&alarm->node);
@@ -134,11 +143,12 @@ static void alarm_enqueue_locked(struct alarm *alarm)
 			leftmost = 0;
 		}
 	}
-	if (leftmost) {
+	if (leftmost) 
 		base->first = &alarm->node;
-		update_timer_locked(base, false);
-	}
 
+    if (leftmost || was_first)
+        update_timer_locked(base, was_first);
+    
 	rb_link_node(&alarm->node, parent, link);
 	rb_insert_color(&alarm->node, &base->alarms);
 }
@@ -373,8 +383,8 @@ static int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 	struct rtc_time     rtc_current_rtc_time;
 	unsigned long       rtc_current_time;
 	unsigned long       rtc_alarm_time;
-	struct timespec     rtc_current_timespec;
 	struct timespec     rtc_delta;
+    struct timespec     wall_time;
 	struct alarm_queue *wakeup_queue = NULL;
 	struct alarm_queue *tmp_queue = NULL;
 
@@ -398,10 +408,11 @@ static int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 		wakeup_queue = tmp_queue;
 	if (wakeup_queue) {
 		rtc_read_time(alarm_rtc_dev, &rtc_current_rtc_time);
-		rtc_current_timespec.tv_nsec = 0;
-		rtc_tm_to_time(&rtc_current_rtc_time,
-			       &rtc_current_timespec.tv_sec);
-		save_time_delta(&rtc_delta, &rtc_current_timespec);
+		getnstimeofday(&wall_time);
+        rtc_tm_to_time(&rtc_current_rtc_time, &rtc_current_time);
+        set_normalized_timespec(&rtc_delta,
+                                wall_time.tv_sec - rtc_current_time,
+                                wall_time.tv_nsec);
 
 		rtc_alarm_time = timespec_sub(ktime_to_timespec(
 			hrtimer_get_expires(&wakeup_queue->timer)),
@@ -455,6 +466,45 @@ static int alarm_resume(struct platform_device *pdev)
 	spin_unlock_irqrestore(&alarm_slock, flags);
 
 	return 0;
+}
+
+static void alarm_shutdown(struct platform_device *dev)
+{
+    struct timespec wall_time;
+    struct rtc_time rtc_time;
+    struct rtc_wkalrm alarm;
+    unsigned long flags;
+    long rtc_secs, alarm_delta, alarm_time;
+    int rc;
+    
+    spin_lock_irqsave(&alarm_slock, flags);
+    
+    if (!power_on_alarm)
+        goto disable_alarm;
+    
+    rtc_read_time(alarm_rtc_dev, &rtc_time);
+    getnstimeofday(&wall_time);
+    rtc_tm_to_time(&rtc_time, &rtc_secs);
+    alarm_delta = wall_time.tv_sec - rtc_secs;
+    alarm_time = power_on_alarm - alarm_delta;
+    if (alarm_time <= rtc_secs)
+        goto disable_alarm;
+    
+    rtc_time_to_tm(alarm_time, &alarm.time);
+    alarm.enabled = 1;
+    rc = rtc_set_alarm(alarm_rtc_dev, &alarm);
+    if (rc)
+        pr_alarm(ERROR, "Unable to set power-on alarm\n");
+    else
+        pr_alarm(FLOW, "Power-on alarm set to %lu\n",
+                alarm_time);
+    
+    spin_unlock_irqrestore(&alarm_slock, flags);
+    return;
+    
+disable_alarm:
+    rtc_alarm_irq_enable(alarm_rtc_dev, 0);
+    spin_unlock_irqrestore(&alarm_slock, flags);
 }
 
 static struct rtc_task alarm_rtc_task = {
@@ -516,6 +566,7 @@ static struct class_interface rtc_alarm_interface = {
 static struct platform_driver alarm_driver = {
 	.suspend = alarm_suspend,
 	.resume = alarm_resume,
+    .shutdown = alarm_shutdown,
 	.driver = {
 		.name = "alarm"
 	}

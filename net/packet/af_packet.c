@@ -627,15 +627,14 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	po->stats.tp_packets++;
+	skb->dropcount = atomic_read(&sk->sk_drops);
 	__skb_queue_tail(&sk->sk_receive_queue, skb);
 	spin_unlock(&sk->sk_receive_queue.lock);
 	sk->sk_data_ready(sk, skb->len);
 	return 0;
 
 drop_n_acct:
-	spin_lock(&sk->sk_receive_queue.lock);
-	po->stats.tp_drops++;
-	spin_unlock(&sk->sk_receive_queue.lock);
+	po->stats.tp_drops = atomic_inc_return(&sk->sk_drops);
 
 drop_n_restore:
 	if (skb_head != skb->data && skb_shared(skb)) {
@@ -829,7 +828,6 @@ static void tpacket_destruct_skb(struct sk_buff *skb)
 
 	if (likely(po->tx_ring.pg_vec)) {
 		ph = skb_shinfo(skb)->destructor_arg;
-		BUG_ON(__packet_get_status(po, ph) != TP_STATUS_SENDING);
 		BUG_ON(atomic_read(&po->tx_ring.pending) == 0);
 		atomic_dec(&po->tx_ring.pending);
 		__packet_set_status(po, ph, TP_STATUS_AVAILABLE);
@@ -1484,7 +1482,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (err)
 		goto out_free;
 
-	sock_recv_timestamp(msg, sk, skb);
+	sock_recv_ts_and_drops(msg, sk, skb);
 
 	if (msg->msg_name)
 		memcpy(msg->msg_name, &PACKET_SKB_CB(skb)->sa,

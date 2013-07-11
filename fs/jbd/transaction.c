@@ -1838,15 +1838,16 @@ static int __dispose_buffer(struct journal_head *jh, transaction_t *transaction)
  * We're outside-transaction here.  Either or both of j_running_transaction
  * and j_committing_transaction may be NULL.
  */
-static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
+static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh,
+                                int partial_page)
 {
 	transaction_t *transaction;
 	struct journal_head *jh;
 	int may_free = 1;
-	int ret;
 
 	BUFFER_TRACE(bh, "entry");
 
+retry:
 	/*
 	 * It is safe to proceed here without the j_list_lock because the
 	 * buffers cannot be stolen by try_to_free_buffers as long as we are
@@ -1889,13 +1890,9 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 			 * committed, the buffer won't be needed any
 			 * longer. */
 			JBUFFER_TRACE(jh, "checkpointed: add to BJ_Forget");
-			ret = __dispose_buffer(jh,
+			may_free = __dispose_buffer(jh,
 					journal->j_running_transaction);
-			journal_put_journal_head(jh);
-			spin_unlock(&journal->j_list_lock);
-			jbd_unlock_bh_state(bh);
-			spin_unlock(&journal->j_state_lock);
-			return ret;
+			goto zap_buffer;
 		} else {
 			/* There is no currently-running transaction. So the
 			 * orphan record which we wrote for this file must have
@@ -1903,13 +1900,9 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 			 * the committing transaction, if it exists. */
 			if (journal->j_committing_transaction) {
 				JBUFFER_TRACE(jh, "give to committing trans");
-				ret = __dispose_buffer(jh,
+				may_free = __dispose_buffer(jh,
 					journal->j_committing_transaction);
-				journal_put_journal_head(jh);
-				spin_unlock(&journal->j_list_lock);
-				jbd_unlock_bh_state(bh);
-				spin_unlock(&journal->j_state_lock);
-				return ret;
+				goto zap_buffer;
 			} else {
 				/* The orphan record's transaction has
 				 * committed.  We can cleanse this buffer */
@@ -1928,17 +1921,28 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 			may_free = __dispose_buffer(jh, transaction);
 			goto zap_buffer;
 		}
+        
+        if (partial_page) {
+            tid_t tid = journal->j_committing_transaction->t_tid;
+        
+            journal_put_journal_head(jh);
+            spin_unlock(&journal->j_list_lock);
+            jbd_unlock_bh_state(bh);
+            spin_unlock(&journal->j_state_lock);
+            unlock_buffer(bh);
+            log_wait_commit(journal, tid);
+            lock_buffer(bh);
+            goto retry;
+        }
+        
 		/*
 		 * If it is committing, we simply cannot touch it.  We
 		 * can remove it's next_transaction pointer from the
 		 * running transaction if that is set, but nothing
 		 * else. */
 		set_buffer_freed(bh);
-		if (jh->b_next_transaction) {
-			J_ASSERT(jh->b_next_transaction ==
-					journal->j_running_transaction);
-			jh->b_next_transaction = NULL;
-		}
+		if (journal->j_running_transaction && buffer_jbddirty(bh))
+            jh->b_next_transaction = journal->j_running_transaction;
 		journal_put_journal_head(jh);
 		spin_unlock(&journal->j_list_lock);
 		jbd_unlock_bh_state(bh);
@@ -1957,6 +1961,7 @@ static int journal_unmap_buffer(journal_t *journal, struct buffer_head *bh)
 	}
 
 zap_buffer:
+    jh->b_modified = 0;
 	journal_put_journal_head(jh);
 zap_buffer_no_jh:
 	spin_unlock(&journal->j_list_lock);
@@ -2005,7 +2010,8 @@ void journal_invalidatepage(journal_t *journal,
 		if (offset <= curr_off) {
 			/* This block is wholly outside the truncation point */
 			lock_buffer(bh);
-			may_free &= journal_unmap_buffer(journal, bh);
+			may_free &= journal_unmap_buffer(journal, bh,
+                                            offset > 0);
 			unlock_buffer(bh);
 		}
 		curr_off = next_off;
@@ -2120,7 +2126,7 @@ void journal_file_buffer(struct journal_head *jh,
  */
 void __journal_refile_buffer(struct journal_head *jh)
 {
-	int was_dirty;
+	int was_dirty, jlist;
 	struct buffer_head *bh = jh2bh(jh);
 
 	J_ASSERT_JH(jh, jbd_is_locked_bh_state(bh));
@@ -2142,8 +2148,13 @@ void __journal_refile_buffer(struct journal_head *jh)
 	__journal_temp_unlink_buffer(jh);
 	jh->b_transaction = jh->b_next_transaction;
 	jh->b_next_transaction = NULL;
-	__journal_file_buffer(jh, jh->b_transaction,
-				jh->b_modified ? BJ_Metadata : BJ_Reserved);
+    if (buffer_freed(bh))
+        jlist = BJ_Forget;
+    else if (jh->b_modified)
+        jlist = BJ_Metadata;
+    else
+        jlist = BJ_Reserved;
+    __journal_file_buffer(jh, jh->b_transaction, jlist);
 	J_ASSERT_JH(jh, jh->b_transaction->t_state == T_RUNNING);
 
 	if (was_dirty)

@@ -10,23 +10,23 @@
  */
 unsigned long int_sqrt(unsigned long x)
 {
-	unsigned long op, res, one;
-
-	op = x;
-	res = 0;
-
-	one = 1UL << (BITS_PER_LONG - 2);
-	while (one > op)
-		one >>= 2;
-
-	while (one != 0) {
-		if (op >= res + one) {
-			op = op - (res + one);
-			res = res +  2 * one;
+	unsigned long b, m, y = 0;
+    
+	if (x <= 1)
+		return x;
+    
+	m = 1UL << (BITS_PER_LONG - 2);
+	while (m != 0) {
+		b = y + m;
+		y >>= 1;
+        
+		if (x >= b) {
+			x -= b;
+			y += m;
 		}
-		res /= 2;
-		one /= 4;
+		m >>= 2;
 	}
-	return res;
+    
+	return y;
 }
 EXPORT_SYMBOL(int_sqrt);

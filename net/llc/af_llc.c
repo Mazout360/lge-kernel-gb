@@ -505,7 +505,7 @@ static int llc_ui_wait_for_disc(struct sock *sk, long timeout)
 	int rc = 0;
 
 	while (1) {
-		prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 		if (sk_wait_event(sk, &timeout, sk->sk_state == TCP_CLOSE))
 			break;
 		rc = -ERESTARTSYS;
@@ -516,7 +516,7 @@ static int llc_ui_wait_for_disc(struct sock *sk, long timeout)
 			break;
 		rc = 0;
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk_sleep(sk), &wait);
 	return rc;
 }
 
@@ -525,13 +525,13 @@ static int llc_ui_wait_for_conn(struct sock *sk, long timeout)
 	DEFINE_WAIT(wait);
 
 	while (1) {
-		prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 		if (sk_wait_event(sk, &timeout, sk->sk_state != TCP_SYN_SENT))
 			break;
 		if (signal_pending(current) || !timeout)
 			break;
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk_sleep(sk), &wait);
 	return timeout;
 }
 
@@ -542,7 +542,7 @@ static int llc_ui_wait_for_busy_core(struct sock *sk, long timeout)
 	int rc;
 
 	while (1) {
-		prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 		rc = 0;
 		if (sk_wait_event(sk, &timeout,
 				  (sk->sk_shutdown & RCV_SHUTDOWN) ||
@@ -557,7 +557,7 @@ static int llc_ui_wait_for_busy_core(struct sock *sk, long timeout)
 		if (!timeout)
 			break;
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk_sleep(sk), &wait);
 	return rc;
 }
 
@@ -674,6 +674,8 @@ static int llc_ui_recvmsg(struct kiocb *iocb, struct socket *sock,
 	int target;	/* Read at least this many bytes */
 	long timeo;
 
+    msg->msg_namelen = 0;
+    
 	lock_sock(sk);
 	copied = -ENOTCONN;
 	if (unlikely(sk->sk_type == SOCK_STREAM && sk->sk_state == TCP_LISTEN))
@@ -912,14 +914,13 @@ static int llc_ui_getname(struct socket *sock, struct sockaddr *uaddr,
 	struct sockaddr_llc sllc;
 	struct sock *sk = sock->sk;
 	struct llc_sock *llc = llc_sk(sk);
-	int rc = 0;
+	int rc = -EBADF;
 
 	memset(&sllc, 0, sizeof(sllc));
 	lock_sock(sk);
 	if (sock_flag(sk, SOCK_ZAPPED))
 		goto out;
 	*uaddrlen = sizeof(sllc);
-	memset(uaddr, 0, *uaddrlen);
 	if (peer) {
 		rc = -ENOTCONN;
 		if (sk->sk_state != TCP_ESTABLISHED)

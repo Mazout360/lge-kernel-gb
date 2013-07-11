@@ -15,7 +15,6 @@
 #include <linux/device.h>
 #include <linux/genhd.h>
 #include <linux/mm.h>
-#include <linux/kernel.h>
 
 #include "zram_drv.h"
 
@@ -35,7 +34,7 @@ static struct zram *dev_to_zram(struct device *dev)
 	int i;
 	struct zram *zram = NULL;
     
-	for (i = 0; i < zram_get_num_devices(); i++) {
+	for (i = 0; i < zram_num_devices; i++) {
 		zram = &zram_devices[i];
 		if (disk_to_dev(zram->disk) == dev)
 			break;
@@ -55,12 +54,13 @@ static ssize_t disksize_show(struct device *dev,
 static ssize_t disksize_store(struct device *dev,
                               struct device_attribute *attr, const char *buf, size_t len)
 {
+	int ret;
 	u64 disksize;
 	struct zram *zram = dev_to_zram(dev);
     
-	disksize = memparse(buf, NULL);
-	if (!disksize)
-		return -EINVAL;
+	ret = strict_strtoull(buf, 10, &disksize);
+	if (ret)
+		return ret;
     
 	down_write(&zram->init_lock);
 	if (zram->init_done) {
@@ -68,12 +68,14 @@ static ssize_t disksize_store(struct device *dev,
 		pr_info("Cannot change disksize for initialized device\n");
 		return -EBUSY;
 	}
+    
 #ifdef CONFIG_ZRAM_FOR_ANDROID
     if (!disksize) {
         disksize = default_disksize_perc_ram *
-        ((totalram_pages << PAGE_SHIFT) / 100);
-    }
+                    ((totalram_pages << PAGE_SHIFT) / 100);
+        }
 #endif
+    
 	zram->disksize = PAGE_ALIGN(disksize);
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
 	up_write(&zram->init_lock);
@@ -93,7 +95,7 @@ static ssize_t reset_store(struct device *dev,
                            struct device_attribute *attr, const char *buf, size_t len)
 {
 	int ret;
-	unsigned short do_reset;
+	unsigned long do_reset;
 	struct zram *zram;
 	struct block_device *bdev;
     
@@ -104,7 +106,7 @@ static ssize_t reset_store(struct device *dev,
 	if (bdev->bd_holders)
 		return -EBUSY;
     
-	ret = kstrtou16(buf, 10, &do_reset);
+	ret = strict_strtoul(buf, 10, &do_reset);
 	if (ret)
 		return ret;
     
@@ -191,8 +193,10 @@ static ssize_t mem_used_total_show(struct device *dev,
 	u64 val = 0;
 	struct zram *zram = dev_to_zram(dev);
     
-	if (zram->init_done)
-		val = zs_get_total_size_bytes(zram->mem_pool);
+	if (zram->init_done) {
+		val = xv_get_total_size_bytes(zram->mem_pool) +
+        ((u64)(zram->stats.pages_expand) << PAGE_SHIFT);
+	}
     
 	return sprintf(buf, "%llu\n", val);
 }

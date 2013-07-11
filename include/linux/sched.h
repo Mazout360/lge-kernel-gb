@@ -2451,7 +2451,16 @@ static inline void thread_group_cputime_free(struct signal_struct *sig)
 extern void recalc_sigpending_and_wake(struct task_struct *t);
 extern void recalc_sigpending(void);
 
-extern void signal_wake_up(struct task_struct *t, int resume_stopped);
+extern void signal_wake_up_state(struct task_struct *t, unsigned int state);
+
+static inline void signal_wake_up(struct task_struct *t, bool resume)
+{
+    signal_wake_up_state(t, resume ? TASK_WAKEKILL : 0);
+}
+static inline void ptrace_signal_wake_up(struct task_struct *t, bool resume)
+{
+    signal_wake_up_state(t, resume ? __TASK_TRACED : 0);
+}
 
 /*
  * Wrappers for p->thread_info->cpu access. No-op on UP.
@@ -2607,6 +2616,16 @@ static inline unsigned long rlimit_max(unsigned int limit)
 {
 	return task_rlimit_max(current, limit);
 }
+
+#ifdef CONFIG_CGROUP_TIMER_SLACK
+extern unsigned long task_get_effective_timer_slack(struct task_struct *tsk);
+#else
+static inline unsigned long task_get_effective_timer_slack(
+                                                        struct task_struct *tsk)
+{
+    return tsk->timer_slack_ns;
+}
+#endif
 
 #endif /* __KERNEL__ */
 

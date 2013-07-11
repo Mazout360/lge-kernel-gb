@@ -31,7 +31,8 @@ enum {
 	DEBUG_EXPIRE = 1U << 3,
 	DEBUG_WAKE_LOCK = 1U << 4,
 };
-static int debug_mask = DEBUG_EXIT_SUSPEND | DEBUG_WAKEUP | DEBUG_SUSPEND;
+static int debug_mask = DEBUG_EXIT_SUSPEND |
+DEBUG_WAKEUP | DEBUG_SUSPEND | DEBUG_EXPIRE;
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
 #define WAKE_LOCK_TYPE_MASK              (0x0f)
@@ -40,19 +41,22 @@ module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 #define WAKE_LOCK_AUTO_EXPIRE            (1U << 10)
 #define WAKE_LOCK_PREVENTING_SUSPEND     (1U << 11)
 
-#if 0
-//20110727 srinivas.mittapalli@lge.com	Patch applied from P990 froyo MR-03
-extern void star_watchdog_disable();
-#endif
-
 static DEFINE_SPINLOCK(list_lock);
 static LIST_HEAD(inactive_locks);
 static struct list_head active_wake_locks[WAKE_LOCK_TYPE_COUNT];
 static int current_event_num;
+static struct workqueue_struct *suspend_sys_sync_work_queue;
+static DECLARE_COMPLETION(suspend_sys_sync_comp);
 struct workqueue_struct *suspend_work_queue;
 struct wake_lock main_wake_lock;
 suspend_state_t requested_suspend_state = PM_SUSPEND_MEM;
 static struct wake_lock unknown_wakeup;
+static struct wake_lock suspend_backoff_lock;
+
+#define SUSPEND_BACKOFF_THRESHOLD	10
+#define SUSPEND_BACKOFF_INTERVAL	10000
+
+static unsigned suspend_short_count;
 
 #ifdef CONFIG_WAKELOCK_STAT
 static struct wake_lock deleted_wake_locks;
@@ -65,22 +69,18 @@ int get_expired_time(struct wake_lock *lock, ktime_t *expire_time)
 	struct timespec kt;
 	struct timespec tomono;
 	struct timespec delta;
-	unsigned long seq;
+	struct timespec sleep;
 	long timeout;
-
+    
 	if (!(lock->flags & WAKE_LOCK_AUTO_EXPIRE))
 		return 0;
-	do {
-		seq = read_seqbegin(&xtime_lock);
-		timeout = lock->expires - jiffies;
-		if (timeout > 0)
-			return 0;
-		kt = current_kernel_time();
-		tomono = wall_to_monotonic;
-	} while (read_seqretry(&xtime_lock, seq));
+	get_xtime_and_monotonic_and_sleep_offset(&kt, &tomono, &sleep);
+	timeout = lock->expires - jiffies;
+	if (timeout > 0)
+		return 0;
 	jiffies_to_timespec(-timeout, &delta);
 	set_normalized_timespec(&ts, kt.tv_sec + tomono.tv_sec - delta.tv_sec,
-				kt.tv_nsec + tomono.tv_nsec - delta.tv_nsec);
+                            kt.tv_nsec + tomono.tv_nsec - delta.tv_nsec);
 	*expire_time = timespec_to_ktime(ts);
 	return 1;
 }
@@ -93,7 +93,7 @@ static int print_lock_stat(struct seq_file *m, struct wake_lock *lock)
 	ktime_t active_time = ktime_set(0, 0);
 	ktime_t total_time = lock->stat.total_time;
 	ktime_t max_time = lock->stat.max_time;
-
+    
 	ktime_t prevent_suspend_time = lock->stat.prevent_suspend_time;
 	if (lock->flags & WAKE_LOCK_ACTIVE) {
 		ktime_t now, add_time;
@@ -109,18 +109,18 @@ static int print_lock_stat(struct seq_file *m, struct wake_lock *lock)
 		total_time = ktime_add(total_time, add_time);
 		if (lock->flags & WAKE_LOCK_PREVENTING_SUSPEND)
 			prevent_suspend_time = ktime_add(prevent_suspend_time,
-					ktime_sub(now, last_sleep_time_update));
+                                             ktime_sub(now, last_sleep_time_update));
 		if (add_time.tv64 > max_time.tv64)
 			max_time = add_time;
 	}
-
+    
 	return seq_printf(m,
-		     "\"%s\"\t%d\t%d\t%d\t%lld\t%lld\t%lld\t%lld\t%lld\n",
-		     lock->name, lock_count, expire_count,
-		     lock->stat.wakeup_count, ktime_to_ns(active_time),
-		     ktime_to_ns(total_time),
-		     ktime_to_ns(prevent_suspend_time), ktime_to_ns(max_time),
-		     ktime_to_ns(lock->stat.last_time));
+                      "\"%s\"\t%d\t%d\t%d\t%lld\t%lld\t%lld\t%lld\t%lld\n",
+                      lock->name, lock_count, expire_count,
+                      lock->stat.wakeup_count, ktime_to_ns(active_time),
+                      ktime_to_ns(total_time),
+                      ktime_to_ns(prevent_suspend_time), ktime_to_ns(max_time),
+                      ktime_to_ns(lock->stat.last_time));
 }
 
 static int wakelock_stats_show(struct seq_file *m, void *unused)
@@ -129,16 +129,16 @@ static int wakelock_stats_show(struct seq_file *m, void *unused)
 	struct wake_lock *lock;
 	int ret;
 	int type;
-
+    
 	spin_lock_irqsave(&list_lock, irqflags);
-
+    
 	ret = seq_puts(m, "name\tcount\texpire_count\twake_count\tactive_since"
-			"\ttotal_time\tsleep_time\tmax_time\tlast_change\n");
+                   "\ttotal_time\tsleep_time\tmax_time\tlast_change\n");
 	list_for_each_entry(lock, &inactive_locks, link)
-		ret = print_lock_stat(m, lock);
+    ret = print_lock_stat(m, lock);
 	for (type = 0; type < WAKE_LOCK_TYPE_COUNT; type++) {
 		list_for_each_entry(lock, &active_wake_locks[type], link)
-			ret = print_lock_stat(m, lock);
+        ret = print_lock_stat(m, lock);
 	}
 	spin_unlock_irqrestore(&list_lock, irqflags);
 	return 0;
@@ -165,7 +165,7 @@ static void wake_unlock_stat_locked(struct wake_lock *lock, int expired)
 	if (lock->flags & WAKE_LOCK_PREVENTING_SUSPEND) {
 		duration = ktime_sub(now, last_sleep_time_update);
 		lock->stat.prevent_suspend_time = ktime_add(
-			lock->stat.prevent_suspend_time, duration);
+                                                    lock->stat.prevent_suspend_time, duration);
 		lock->flags &= ~WAKE_LOCK_PREVENTING_SUSPEND;
 	}
 }
@@ -175,7 +175,7 @@ static void update_sleep_wait_stats_locked(int done)
 	struct wake_lock *lock;
 	ktime_t now, etime, elapsed, add;
 	int expired;
-
+    
 	now = ktime_get();
 	elapsed = ktime_sub(now, last_sleep_time_update);
 	list_for_each_entry(lock, &active_wake_locks[WAKE_LOCK_SUSPEND], link) {
@@ -186,7 +186,7 @@ static void update_sleep_wait_stats_locked(int done)
 			else
 				add = elapsed;
 			lock->stat.prevent_suspend_time = ktime_add(
-				lock->stat.prevent_suspend_time, add);
+                                                        lock->stat.prevent_suspend_time, add);
 		}
 		if (done || expired)
 			lock->flags &= ~WAKE_LOCK_PREVENTING_SUSPEND;
@@ -215,29 +215,67 @@ static void print_active_locks(int type)
 {
 	struct wake_lock *lock;
 	bool print_expired = true;
-
+    
 	BUG_ON(type >= WAKE_LOCK_TYPE_COUNT);
 	list_for_each_entry(lock, &active_wake_locks[type], link) {
 		if (lock->flags & WAKE_LOCK_AUTO_EXPIRE) {
 			long timeout = lock->expires - jiffies;
 			if (timeout > 0)
 				pr_info("active wake lock %s, time left %ld\n",
-					lock->name, timeout);
+                        lock->name, timeout);
 			else if (print_expired)
 				pr_info("wake lock %s, expired\n", lock->name);
 		} else {
 			pr_info("active wake lock %s\n", lock->name);
-			if (!debug_mask & DEBUG_EXPIRE)
+			if (!(debug_mask & DEBUG_EXPIRE))
 				print_expired = false;
 		}
 	}
 }
 
+extern void set_debug_lock_timer(int enable, unsigned int timeout);
+
+static void debug_wake_locks(unsigned long notuse)
+{
+	/* Print active wakelocks */
+	struct wake_lock *lock;
+	unsigned long irqflags;
+    
+	spin_lock_irqsave(&list_lock, irqflags);
+	list_for_each_entry(lock, &active_wake_locks[WAKE_LOCK_SUSPEND], link) {
+		if (lock->flags & WAKE_LOCK_AUTO_EXPIRE) {
+			long timeout = lock->expires - jiffies;
+			if (timeout > 0)
+				pr_info("[%s]active wake lock %s, time left %ld\n",
+                        __func__, lock->name, timeout);
+		} else
+			pr_info("[%s]active wake lock %s\n",
+					__func__, lock->name);
+	}
+	spin_unlock_irqrestore(&list_lock, irqflags);
+    
+	/* Restart debug timer with 3seconds timeout */
+	set_debug_lock_timer(1, msecs_to_jiffies(5000));
+}
+
+static DEFINE_TIMER(debug_locks_timer, debug_wake_locks, 0, 0);
+
+void set_debug_lock_timer(int enable, unsigned int timeout)
+{
+	/* Delete timer first */
+	del_timer(&debug_locks_timer);
+    
+	/* Set new timer with timeout */
+	if (enable)
+		mod_timer(&debug_locks_timer, jiffies + timeout);
+}
+EXPORT_SYMBOL(set_debug_lock_timer);
+
 static long has_wake_lock_locked(int type)
 {
 	struct wake_lock *lock, *n;
 	long max_timeout = 0;
-
+    
 	BUG_ON(type >= WAKE_LOCK_TYPE_COUNT);
 	list_for_each_entry_safe(lock, n, &active_wake_locks[type], link) {
 		if (lock->flags & WAKE_LOCK_AUTO_EXPIRE) {
@@ -264,39 +302,53 @@ long has_wake_lock(int type)
 	return ret;
 }
 
+static void suspend_backoff(void)
+{
+	pr_info("suspend: too many immediate wakeups, back off\n");
+	wake_lock_timeout(&suspend_backoff_lock,
+                      msecs_to_jiffies(SUSPEND_BACKOFF_INTERVAL));
+}
+
 static void suspend(struct work_struct *work)
 {
 	int ret;
 	int entry_event_num;
-
+	struct timespec ts_entry, ts_exit;
+    
 	if (has_wake_lock(WAKE_LOCK_SUSPEND)) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("suspend: abort suspend\n");
 		return;
 	}
-
+    
+	set_debug_lock_timer(0, 0);
+    
 	entry_event_num = current_event_num;
-#if 0
-	sys_sync();
-#endif
-	if (debug_mask & DEBUG_SUSPEND)
-		pr_info("suspend: enter suspend\n");
+	getnstimeofday(&ts_entry);
 	ret = pm_suspend(requested_suspend_state);
+	getnstimeofday(&ts_exit);
+    
 	if (debug_mask & DEBUG_EXIT_SUSPEND) {
-		struct timespec ts;
 		struct rtc_time tm;
-		getnstimeofday(&ts);
-		rtc_time_to_tm(ts.tv_sec, &tm);
+		rtc_time_to_tm(ts_exit.tv_sec, &tm);
 		pr_info("suspend: exit suspend, ret = %d "
-			"(%d-%02d-%02d %02d:%02d:%02d.%09lu UTC)\n", ret,
-			tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-			tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
+                "(%d-%02d-%02d %02d:%02d:%02d.%09lu UTC)\n", ret,
+                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                tm.tm_hour, tm.tm_min, tm.tm_sec, ts_exit.tv_nsec);
 	}
-#if 0
-//20110727 srinivas.mittapalli@lge.com	Patch applied from P990 froyo MR-03	
-	printk("[LOG] star_watchdog_disable() called at suspend() \n");
-	star_watchdog_disable();
-#endif	
+	set_debug_lock_timer(1, msecs_to_jiffies(5000));
+    
+	if (ts_exit.tv_sec - ts_entry.tv_sec <= 1) {
+		++suspend_short_count;
+        
+		if (suspend_short_count == SUSPEND_BACKOFF_THRESHOLD) {
+			suspend_backoff();
+			suspend_short_count = 0;
+		}
+	} else {
+		suspend_short_count = 0;
+	}
+    
 	if (current_event_num == entry_event_num) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("suspend: pm_suspend returned with no event\n");
@@ -329,13 +381,6 @@ static int power_suspend_late(struct device *dev)
 #ifdef CONFIG_WAKELOCK_STAT
 	wait_for_wakeup = !ret;
 #endif
-
-#if 0
-//20110727 srinivas.mittapalli@lge.com	Patch applied from P990 froyo MR-03
-	printk("[LOG] star_watchdog_disable() called at power_suspend_late() \n");
-	star_watchdog_disable();
-#endif
-
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("power_suspend_late return %d\n", ret);
 	return ret;
@@ -356,11 +401,11 @@ static struct platform_device power_device = {
 void wake_lock_init(struct wake_lock *lock, int type, const char *name)
 {
 	unsigned long irqflags = 0;
-
+    
 	if (name)
 		lock->name = name;
 	BUG_ON(!lock->name);
-
+    
 	if (debug_mask & DEBUG_WAKE_LOCK)
 		pr_info("wake_lock_init name=%s\n", lock->name);
 #ifdef CONFIG_WAKELOCK_STAT
@@ -373,7 +418,7 @@ void wake_lock_init(struct wake_lock *lock, int type, const char *name)
 	lock->stat.last_time = ktime_set(0, 0);
 #endif
 	lock->flags = (type & WAKE_LOCK_TYPE_MASK) | WAKE_LOCK_INITIALIZED;
-
+    
 	INIT_LIST_HEAD(&lock->link);
 	spin_lock_irqsave(&list_lock, irqflags);
 	list_add(&lock->link, &inactive_locks);
@@ -393,13 +438,13 @@ void wake_lock_destroy(struct wake_lock *lock)
 		deleted_wake_locks.stat.count += lock->stat.count;
 		deleted_wake_locks.stat.expire_count += lock->stat.expire_count;
 		deleted_wake_locks.stat.total_time =
-			ktime_add(deleted_wake_locks.stat.total_time,
+        ktime_add(deleted_wake_locks.stat.total_time,
 				  lock->stat.total_time);
 		deleted_wake_locks.stat.prevent_suspend_time =
-			ktime_add(deleted_wake_locks.stat.prevent_suspend_time,
+        ktime_add(deleted_wake_locks.stat.prevent_suspend_time,
 				  lock->stat.prevent_suspend_time);
 		deleted_wake_locks.stat.max_time =
-			ktime_add(deleted_wake_locks.stat.max_time,
+        ktime_add(deleted_wake_locks.stat.max_time,
 				  lock->stat.max_time);
 	}
 #endif
@@ -409,12 +454,12 @@ void wake_lock_destroy(struct wake_lock *lock)
 EXPORT_SYMBOL(wake_lock_destroy);
 
 static void wake_lock_internal(
-	struct wake_lock *lock, long timeout, int has_timeout)
+                               struct wake_lock *lock, long timeout, int has_timeout)
 {
 	int type;
 	unsigned long irqflags;
 	long expire_in;
-
+    
 	spin_lock_irqsave(&list_lock, irqflags);
 	type = lock->flags & WAKE_LOCK_TYPE_MASK;
 	BUG_ON(type >= WAKE_LOCK_TYPE_COUNT);
@@ -442,8 +487,8 @@ static void wake_lock_internal(
 	if (has_timeout) {
 		if (debug_mask & DEBUG_WAKE_LOCK)
 			pr_info("wake_lock: %s, type %d, timeout %ld.%03lu\n",
-				lock->name, type, timeout / HZ,
-				(timeout % HZ) * MSEC_PER_SEC / HZ);
+                    lock->name, type, timeout / HZ,
+                    (timeout % HZ) * MSEC_PER_SEC / HZ);
 		lock->expires = jiffies + timeout;
 		lock->flags |= WAKE_LOCK_AUTO_EXPIRE;
 		list_add_tail(&lock->link, &active_wake_locks[type]);
@@ -469,13 +514,13 @@ static void wake_lock_internal(
 		if (expire_in > 0) {
 			if (debug_mask & DEBUG_EXPIRE)
 				pr_info("wake_lock: %s, start expire timer, "
-					"%ld\n", lock->name, expire_in);
+                        "%ld\n", lock->name, expire_in);
 			mod_timer(&expire_timer, jiffies + expire_in);
 		} else {
 			if (del_timer(&expire_timer))
 				if (debug_mask & DEBUG_EXPIRE)
 					pr_info("wake_lock: %s, stop expire timer\n",
-						lock->name);
+                            lock->name);
 			if (expire_in == 0)
 				queue_work(suspend_work_queue, &suspend_work);
 		}
@@ -514,13 +559,13 @@ void wake_unlock(struct wake_lock *lock)
 		if (has_lock > 0) {
 			if (debug_mask & DEBUG_EXPIRE)
 				pr_info("wake_unlock: %s, start expire timer, "
-					"%ld\n", lock->name, has_lock);
+                        "%ld\n", lock->name, has_lock);
 			mod_timer(&expire_timer, jiffies + has_lock);
 		} else {
 			if (del_timer(&expire_timer))
 				if (debug_mask & DEBUG_EXPIRE)
 					pr_info("wake_unlock: %s, stop expire "
-						"timer\n", lock->name);
+                            "timer\n", lock->name);
 			if (has_lock == 0)
 				queue_work(suspend_work_queue, &suspend_work);
 		}
@@ -555,70 +600,24 @@ static const struct file_operations wakelock_stats_fops = {
 	.release = single_release,
 };
 
-//20101008, , add sysfs to check the status of the active wakelocks  [START]
-
-static int active_wakelock_stats_show(struct seq_file *m, void *unused)
-{
-	unsigned long irqflags;
-	struct wake_lock *lock;
-	bool print_expired = true;
-	int ret;
-	int type = WAKE_LOCK_SUSPEND;
-	
-	spin_lock_irqsave(&list_lock, irqflags);
-
-	list_for_each_entry(lock, &active_wake_locks[type], link) {
-		if (lock->flags & WAKE_LOCK_AUTO_EXPIRE) {
-			long timeout = lock->expires - jiffies;
-			if (timeout > 0)
-				seq_printf(m, "active wake lock %s, time left %ld\n",
-					lock->name, timeout);
-			else if (print_expired)
-				seq_printf(m, "wake lock %s, expired\n", lock->name);
-		} else {
-			seq_printf(m, "active wake lock %s\n", lock->name);
-			if (!debug_mask & DEBUG_EXPIRE)
-				print_expired = false;
-		}
-	}
-
-	spin_unlock_irqrestore(&list_lock, irqflags);
-	return 0;
-}
-
-
-
-static int active_wakelock_stats_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, active_wakelock_stats_show, NULL);
-}
-
-static const struct file_operations active_wakelock_stats_fops = {
-	.owner = THIS_MODULE,
-	.open = active_wakelock_stats_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-//20101008, , add sysfs to check the status of the active wakelocks  [START]
-
-
 static int __init wakelocks_init(void)
 {
 	int ret;
 	int i;
-
+    
 	for (i = 0; i < ARRAY_SIZE(active_wake_locks); i++)
 		INIT_LIST_HEAD(&active_wake_locks[i]);
-
+    
 #ifdef CONFIG_WAKELOCK_STAT
 	wake_lock_init(&deleted_wake_locks, WAKE_LOCK_SUSPEND,
-			"deleted_wake_locks");
+                   "deleted_wake_locks");
 #endif
 	wake_lock_init(&main_wake_lock, WAKE_LOCK_SUSPEND, "main");
 	wake_lock(&main_wake_lock);
 	wake_lock_init(&unknown_wakeup, WAKE_LOCK_SUSPEND, "unknown_wakeups");
-
+	wake_lock_init(&suspend_backoff_lock, WAKE_LOCK_SUSPEND,
+                   "suspend_backoff");
+    
 	ret = platform_device_register(&power_device);
 	if (ret) {
 		pr_err("wakelocks_init: platform_device_register failed\n");
@@ -629,28 +628,34 @@ static int __init wakelocks_init(void)
 		pr_err("wakelocks_init: platform_driver_register failed\n");
 		goto err_platform_driver_register;
 	}
-
+    
+	INIT_COMPLETION(suspend_sys_sync_comp);
+	suspend_sys_sync_work_queue =
+    create_singlethread_workqueue("suspend_sys_sync");
+	if (suspend_sys_sync_work_queue == NULL) {
+		ret = -ENOMEM;
+		goto err_suspend_sys_sync_work_queue;
+	}
+    
 	suspend_work_queue = create_singlethread_workqueue("suspend");
 	if (suspend_work_queue == NULL) {
 		ret = -ENOMEM;
 		goto err_suspend_work_queue;
 	}
-
+    
 #ifdef CONFIG_WAKELOCK_STAT
 	proc_create("wakelocks", S_IRUGO, NULL, &wakelock_stats_fops);
 #endif
-
-	//20101008, , add sysfs to check the status of the active wakelocks  [START]
-	proc_create("active_wakelocks", S_IRUGO, NULL, &active_wakelock_stats_fops);
-	//20101008, , add sysfs to check the status of the active wakelocks  [START]
-
+    
 	return 0;
-
+    
 err_suspend_work_queue:
+err_suspend_sys_sync_work_queue:
 	platform_driver_unregister(&power_driver);
 err_platform_driver_register:
 	platform_device_unregister(&power_device);
 err_platform_device_register:
+	wake_lock_destroy(&suspend_backoff_lock);
 	wake_lock_destroy(&unknown_wakeup);
 	wake_lock_destroy(&main_wake_lock);
 #ifdef CONFIG_WAKELOCK_STAT
@@ -665,8 +670,10 @@ static void  __exit wakelocks_exit(void)
 	remove_proc_entry("wakelocks", NULL);
 #endif
 	destroy_workqueue(suspend_work_queue);
+	destroy_workqueue(suspend_sys_sync_work_queue);
 	platform_driver_unregister(&power_driver);
 	platform_device_unregister(&power_device);
+	wake_lock_destroy(&suspend_backoff_lock);
 	wake_lock_destroy(&unknown_wakeup);
 	wake_lock_destroy(&main_wake_lock);
 #ifdef CONFIG_WAKELOCK_STAT

@@ -16,6 +16,7 @@
 #include <linux/sysfs.h>
 #include <linux/cpufreq.h>
 #include <linux/jiffies.h>
+#include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/kobject.h>
 #include <linux/spinlock.h>

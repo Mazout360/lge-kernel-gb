@@ -809,7 +809,7 @@ void update_wall_time(void)
 #endif
 	/* Check if there's really nothing to do */
 	if (offset < timekeeper.cycle_interval)
-		return;
+		goto out;
 
 	timekeeper.xtime_nsec = (s64)xtime.tv_nsec << timekeeper.shift;
 
@@ -881,6 +881,7 @@ void update_wall_time(void)
 	timekeeper.ntp_error +=	timekeeper.xtime_nsec <<
 				timekeeper.ntp_error_shift;
 
+out:
 	nsecs = clocksource_cyc2ns(offset, timekeeper.mult, timekeeper.shift);
 	update_xtime_cache(nsecs);
 
@@ -993,3 +994,23 @@ ktime_t ktime_get_update_offsets(ktime_t *real)
 	return now;
 }
 #endif
+
+/**
+ * get_xtime_and_monotonic_and_sleep_offset() - get xtime, wall_to_monotonic,
+ *    and sleep offsets.
+ * @xtim:	pointer to timespec to be set with xtime
+ * @wtom:	pointer to timespec to be set with wall_to_monotonic
+ * @sleep:	pointer to timespec to be set with time in suspend
+ */
+void get_xtime_and_monotonic_and_sleep_offset(struct timespec *xtim,
+                                              struct timespec *wtom, struct timespec *sleep)
+{
+	unsigned long seq;
+    
+	do {
+		seq = read_seqbegin(&xtime_lock);
+		*xtim = xtime;
+		*wtom = wall_to_monotonic;
+		*sleep = total_sleep_time;
+	} while (read_seqretry(&xtime_lock, seq));
+}

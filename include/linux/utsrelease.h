@@ -1,1 +1,1 @@
-#define UTS_RELEASE "2.6.32.60-mazkrnl.GB"
+#define UTS_RELEASE "2.6.32.61-mazkrnl.HF"

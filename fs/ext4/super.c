@@ -1939,7 +1939,9 @@ static void ext4_orphan_cleanup(struct super_block *sb,
 				__func__, inode->i_ino, inode->i_size);
 			jbd_debug(2, "truncating inode %lu to %lld bytes\n",
 				  inode->i_ino, inode->i_size);
+            mutex_lock(&inode->i_mutex);
 			ext4_truncate(inode);
+            mutex_unlock(&inode->i_mutex);
 			nr_truncates++;
 		} else {
 			ext4_msg(sb, KERN_DEBUG,
@@ -1998,10 +2000,13 @@ static loff_t ext4_max_size(int blkbits, int has_huge_files)
 		upper_limit <<= blkbits;
 	}
 
-	/* 32-bit extent-start container, ee_block */
-	res = 1LL << 32;
+	/*
+     * 32-bit extent-start container, ee_block. We lower the maxbytes
+     * by one fs block, so ee_len can cover the extent of maximum file
+     * size
+     */
+    res = (1LL << 32) - 1;
 	res <<= blkbits;
-	res -= 1;
 
 	/* Sanity check against vm- & vfs- imposed limits */
 	if (res > upper_limit)

@@ -31,6 +31,7 @@
 #include <linux/debugfs.h>
 #include <linux/power_supply.h>
 #include <linux/wakelock.h>
+#include <linux/slab.h>
 
 #include "nvcommon.h"
 #include "nvos.h"

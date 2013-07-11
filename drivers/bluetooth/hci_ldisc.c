@@ -231,6 +231,15 @@ static int hci_uart_send_frame(struct sk_buff *skb)
 	return 0;
 }
 
+static void hci_uart_destruct(struct hci_dev *hdev)
+{
+	if (!hdev)
+		return;
+
+	BT_DBG("%s", hdev->name);
+	kfree(hdev->driver_data);
+}
+
 /* ------ LDISC part ------ */
 /* hci_uart_tty_open
  * 
@@ -243,9 +252,14 @@ static int hci_uart_send_frame(struct sk_buff *skb)
  */
 static int hci_uart_tty_open(struct tty_struct *tty)
 {
-	struct hci_uart *hu;
+	struct hci_uart *hu = (void *) tty->disc_data;
 
 	BT_DBG("tty %p", tty);
+
+	/* FIXME: This btw is bogus, nothing requires the old ldisc to clear
+	   the pointer */
+	if (hu)
+		return -EEXIST;
 
 	/* Error if the tty has no write op instead of leaving an exploitable
 	   hole */
@@ -296,15 +310,13 @@ static void hci_uart_tty_close(struct tty_struct *tty)
 			hci_uart_close(hdev);
 
 		if (test_and_clear_bit(HCI_UART_PROTO_SET, &hu->flags)) {
+			hu->proto->close(hu);
 			if (hdev) {
 				hci_unregister_dev(hdev);
 				hci_free_dev(hdev);
 			}
-        hu->proto->close(hu);
-        }
-        
-	kfree(hu);
-    }
+		}
+	}
 }
 
 /* hci_uart_tty_wakeup()
@@ -347,7 +359,6 @@ static void hci_uart_tty_wakeup(struct tty_struct *tty)
  */
 static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data, char *flags, int count)
 {
-    int ret;
 	struct hci_uart *hu = (void *)tty->disc_data;
 
 	if (!hu || tty != hu->tty)
@@ -357,9 +368,8 @@ static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data, char *f
 		return;
 
 	spin_lock(&hu->rx_lock);
-	ret = hu->proto->recv(hu, (void *) data, count);
-    if (ret > 0)
-        hu->hdev->stat.byte_rx += count;
+	hu->proto->recv(hu, (void *) data, count);
+	hu->hdev->stat.byte_rx += count;
 	spin_unlock(&hu->rx_lock);
 
 	tty_unthrottle(tty);
@@ -380,13 +390,14 @@ static int hci_uart_register_dev(struct hci_uart *hu)
 
 	hu->hdev = hdev;
 
-	hdev->type = HCI_UART;
+	hdev->bus = HCI_UART;
 	hdev->driver_data = hu;
 
 	hdev->open  = hci_uart_open;
 	hdev->close = hci_uart_close;
 	hdev->flush = hci_uart_flush;
 	hdev->send  = hci_uart_send_frame;
+	hdev->destruct = hci_uart_destruct;
 	//hdev->parent = hu->tty->dev;
 
 	hdev->owner = THIS_MODULE;

@@ -2854,6 +2854,7 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
     if (unlikely(!PageSwapCache(page) || page_private(page) != entry.val))
         goto out_page;
 
+#ifdef CONFIG_KSM
     if (ksm_might_need_to_copy(page, vma, address)) {
         swapcache = page;
         page = ksm_does_need_to_copy(page, vma, address);
@@ -2865,6 +2866,7 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
             goto out_page;
         }
     }
+#endif
     
 	if (mem_cgroup_try_charge_swapin(mm, page, GFP_KERNEL, &ptr)) {
 		ret = VM_FAULT_OOM;

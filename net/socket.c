@@ -669,6 +669,21 @@ void __sock_recv_timestamp(struct msghdr *msg, struct sock *sk,
 
 EXPORT_SYMBOL_GPL(__sock_recv_timestamp);
 
+inline void sock_recv_drops(struct msghdr *msg, struct sock *sk, struct sk_buff *skb)
+{
+	if (sock_flag(sk, SOCK_RXQ_OVFL) && skb && skb->dropcount)
+		put_cmsg(msg, SOL_SOCKET, SO_RXQ_OVFL,
+			sizeof(__u32), &skb->dropcount);
+}
+
+void sock_recv_ts_and_drops(struct msghdr *msg, struct sock *sk,
+	struct sk_buff *skb)
+{
+	sock_recv_timestamp(msg, sk, skb);
+	sock_recv_drops(msg, sk, skb);
+}
+EXPORT_SYMBOL_GPL(sock_recv_ts_and_drops);
+
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 				 struct msghdr *msg, size_t size, int flags)
 {
@@ -734,9 +749,9 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
 
 	sock = file->private_data;
 
-	flags = !(file->f_flags & O_NONBLOCK) ? 0 : MSG_DONTWAIT;
-	if (more)
-		flags |= MSG_MORE;
+	flags = (file->f_flags & O_NONBLOCK) ? MSG_DONTWAIT : 0;
+    /* more is a combination of MSG_MORE and MSG_SENDPAGE_NOTLAST */
+    flags |= more;
 
 	return kernel_sendpage(sock, page, offset, size, flags);
 }

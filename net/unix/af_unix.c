@@ -317,7 +317,7 @@ static void unix_write_space(struct sock *sk)
 	read_lock(&sk->sk_callback_lock);
 	if (unix_writable(sk)) {
 		if (sk_has_sleeper(sk))
-			wake_up_interruptible_sync(sk->sk_sleep);
+			wake_up_interruptible_sync(sk_sleep(sk));
 		sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	}
 	read_unlock(&sk->sk_callback_lock);
@@ -371,7 +371,7 @@ static void unix_sock_destructor(struct sock *sk)
 #endif
 }
 
-static int unix_release_sock(struct sock *sk, int embrion)
+static void unix_release_sock(struct sock *sk, int embrion)
 {
 	struct unix_sock *u = unix_sk(sk);
 	struct dentry *dentry;
@@ -446,8 +446,6 @@ static int unix_release_sock(struct sock *sk, int embrion)
 
 	if (unix_tot_inflight)
 		unix_gc();		/* Garbage collect fds */
-
-	return 0;
 }
 
 static int unix_listen(struct socket *sock, int backlog)
@@ -661,9 +659,10 @@ static int unix_release(struct socket *sock)
 	if (!sk)
 		return 0;
 
+    unix_release_sock(sk, 0);
 	sock->sk = NULL;
 
-	return unix_release_sock(sk, 0);
+	return 0;
 }
 
 static int unix_autobind(struct socket *sock)
@@ -1785,7 +1784,7 @@ static long unix_stream_data_wait(struct sock *sk, long timeo)
 	unix_state_lock(sk);
 
 	for (;;) {
-		prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
 
 		if (!skb_queue_empty(&sk->sk_receive_queue) ||
 		    sk->sk_err ||
@@ -1801,7 +1800,7 @@ static long unix_stream_data_wait(struct sock *sk, long timeo)
 		clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
 	}
 
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk_sleep(sk), &wait);
 	unix_state_unlock(sk);
 	return timeo;
 }
@@ -2041,7 +2040,7 @@ static unsigned int unix_poll(struct file *file, struct socket *sock, poll_table
 	struct sock *sk = sock->sk;
 	unsigned int mask;
 
-	sock_poll_wait(file, sk->sk_sleep, wait);
+	sock_poll_wait(file, sk_sleep(sk), wait);
 	mask = 0;
 
 	/* exceptional events? */
@@ -2078,7 +2077,7 @@ static unsigned int unix_dgram_poll(struct file *file, struct socket *sock,
 	struct sock *sk = sock->sk, *other;
 	unsigned int mask, writable;
 
-	sock_poll_wait(file, sk->sk_sleep, wait);
+	sock_poll_wait(file, sk_sleep(sk), wait);
 	mask = 0;
 
 	/* exceptional events? */

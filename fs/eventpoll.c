@@ -1187,6 +1187,8 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_even
 	 */
 	epi->event.events = event->events;
 	epi->event.data = event->data; /* protected by mtx */
+    
+    smp_mb();
 
 	/*
 	 * Get current event bits. We can safely use the file* here because
